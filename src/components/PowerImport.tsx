@@ -3,7 +3,17 @@ import { api, fmt } from '../lib/api';
 import { useAction, useLoad } from '../lib/hooks';
 import { readScreenshot } from '../lib/ocr';
 import { matchPowers } from '../lib/powerParse';
-import type { RosterMember } from '../lib/types';
+import { RANKS, type Rank, type RosterMember } from '../lib/types';
+
+interface NewRow {
+  /** 명단의 문파원과 연결 (빈 값이면 새 문파원으로 추가) */
+  link: string;
+  nickname: string;
+  rank: Rank;
+  value: string;
+  checked: boolean;
+  rowText: string;
+}
 
 interface Row {
   member: RosterMember;
@@ -19,6 +29,9 @@ export function PowerImport({ onSaved }: { onSaved?: () => void }) {
   const [progress, setProgress] = useState<string | null>(null);
   const [rows, setRows] = useState<Row[] | null>(null);
   const [unmatched, setUnmatched] = useState<string[]>([]);
+  const [newRows, setNewRows] = useState<NewRow[]>([]);
+  // 이번에 읽어서 찾은 문파원 (저장해서 표에서 빠져도 '못 찾음'으로 돌아가지 않게)
+  const [found, setFound] = useState<Set<string>>(new Set());
   const inputRef = useRef<HTMLInputElement>(null);
   const { busy, run } = useAction();
 
@@ -40,19 +53,23 @@ export function PowerImport({ onSaved }: { onSaved?: () => void }) {
       setProgress(`${i + 1}/${files.length}장 읽는 중… (처음 한 번은 글자 인식 데이터를 내려받느라 조금 걸립니다)`);
       allRows.push(...(await readScreenshot(f, (p) => setProgress(`${i + 1}/${files.length}장 읽는 중… ${Math.round(p * 100)}%`))));
     }
-    const { matches, unmatched } = matchPowers(allRows, list);
+    const { matches, unmatched, newcomers } = matchPowers(allRows, list);
+    setNewRows(newcomers.sort((a, b) => b.value - a.value).map((n) => ({ link: '', nickname: n.nickname, rank: n.rank, value: String(n.value), checked: !!n.nickname && !list.length, rowText: n.rowText })));
     setRows(
       matches
         .sort((a, b) => b.value - a.value)
         .map((m) => ({ member: m.member, value: String(m.value), checked: m.value !== m.member.combat_power, rowText: m.rowText })),
     );
     setUnmatched(unmatched);
+    setFound(new Set(matches.map((m) => m.member.id)));
     setProgress(null);
   }
 
-  const found = new Set(rows?.map((r) => r.member.id));
   const missing = list.filter((m) => !found.has(m.id));
   const toSave = (rows ?? []).filter((r) => r.checked && Number(r.value) > 0);
+  const toLink = newRows.filter((r) => r.checked && r.link && Number(r.value) > 0);
+  const toAdd = newRows.filter((r) => r.checked && !r.link && r.nickname.trim() && !list.some((m) => m.nickname === r.nickname.trim()));
+  const linked = new Set(newRows.map((r) => r.link).filter(Boolean));
 
   return (
     <div className="power-import">
@@ -72,7 +89,7 @@ export function PowerImport({ onSaved }: { onSaved?: () => void }) {
           {files.length > 0 && (
             <>
               <span className="muted small">{files.length}장 선택됨</span>
-              <button className="link-btn" onClick={() => { setFiles([]); setRows(null); setUnmatched([]); }}>
+              <button className="link-btn" onClick={() => { setFiles([]); setRows(null); setUnmatched([]); setNewRows([]); setFound(new Set()); }}>
                 비우기
               </button>
             </>
@@ -167,6 +184,92 @@ export function PowerImport({ onSaved }: { onSaved?: () => void }) {
               </ul>
             </details>
           )}
+        </section>
+      )}
+      {newRows.length > 0 && (
+        <section className="panel">
+          <div className="panel-title-row">
+            <h2 className="panel-title">
+              닉네임을 못 맞춘 카드 <span className="muted small">{newRows.length}개</span>
+            </h2>
+            <button
+              className="btn btn-red"
+              disabled={busy || !(toAdd.length + toLink.length)}
+              onClick={() =>
+                run(async () => {
+                  if (toLink.length) await api.setPowers(toLink.map((r) => ({ id: r.link, combat_power: Math.floor(Number(r.value)) })));
+                  if (toAdd.length)
+                    await api.importRoster(toAdd.map((r) => ({ nickname: r.nickname.trim(), rank: r.rank, combat_power: Math.floor(Number(r.value) || 0), coins: null })));
+                  members.reload();
+                  onSaved?.();
+                  setNewRows((rs) => rs.filter((r) => !toAdd.includes(r) && !toLink.includes(r)));
+                  setFound((f) => new Set([...f, ...toLink.map((r) => r.link)]));
+                }, `전투력 갱신 ${toLink.length}명 · 명단 추가 ${toAdd.length}명`)
+              }
+            >
+              {toLink.length + toAdd.length}명 저장
+            </button>
+          </div>
+          <p className="muted small">
+            {list.length === 0
+              ? '명단이 비어 있어서 읽은 문파원이 모두 여기 나옵니다. '
+              : '짧은 닉네임은 글자 인식이 자주 틀립니다. 기존 문파원이면 「명단 연결」에서 누구인지 고르고, 정말 새로 온 사람이면 닉네임을 게임과 똑같이 고쳐 추가하세요. '}
+            {list.length === 0 && '닉네임을 게임과 똑같이 고친 뒤 추가하세요. '}읽은 전투력도 함께 저장됩니다.
+          </p>
+          <div className="table-wrap">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th />
+                  {list.length > 0 && <th>명단 연결</th>}
+                  <th>닉네임</th>
+                  <th>직위</th>
+                  <th className="r">전투력</th>
+                  <th>읽은 줄</th>
+                </tr>
+              </thead>
+              <tbody>
+                {newRows.map((r, i) => {
+                  const set = (patch: Partial<NewRow>) => setNewRows((rs) => rs.map((x, j) => (j === i ? { ...x, ...patch } : x)));
+                  return (
+                    <tr key={i}>
+                      <td>
+                        <input type="checkbox" checked={r.checked} onChange={(e) => set({ checked: e.target.checked })} />
+                      </td>
+                      {list.length > 0 && (
+                        <td>
+                          <select className="input input-small" value={r.link} onChange={(e) => set({ link: e.target.value, checked: true })}>
+                            <option value="">새 문파원으로 추가</option>
+                            {missing
+                              .filter((m) => m.id === r.link || !linked.has(m.id))
+                              .map((m) => (
+                                <option key={m.id} value={m.id}>
+                                  {m.nickname}
+                                </option>
+                              ))}
+                          </select>
+                        </td>
+                      )}
+                      <td>
+                        <input className="input input-small" maxLength={20} disabled={!!r.link} value={r.link ? '' : r.nickname} onChange={(e) => set({ nickname: e.target.value, checked: true })} />
+                      </td>
+                      <td>
+                        <select className="input input-small" disabled={!!r.link} value={r.rank} onChange={(e) => set({ rank: e.target.value as Rank })}>
+                          {RANKS.map((k) => (
+                            <option key={k}>{k}</option>
+                          ))}
+                        </select>
+                      </td>
+                      <td className="r">
+                        <input className="input input-small num" inputMode="numeric" value={r.value} onChange={(e) => set({ value: e.target.value.replace(/\D/g, '') })} />
+                      </td>
+                      <td className="muted small ocr-text">{r.rowText}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         </section>
       )}
     </div>
