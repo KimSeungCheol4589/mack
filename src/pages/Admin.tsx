@@ -2,13 +2,14 @@ import { useEffect, useState } from 'react';
 import { ITEM_IMAGES, ITEM_IMAGE_LABEL, ItemIcon } from '../components/ItemIcon';
 import { MemberGate, RoleBadge } from '../components/Layout';
 import { PowerImport } from '../components/PowerImport';
+import { WeeklySettlement } from '../components/WeeklySettlement';
 import { api, fmt, fmtDate } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { useAction, useLoad } from '../lib/hooks';
 import { today, weekLabel, weekStart } from '../lib/week';
-import { ACTIVITIES, KIND_LABEL, ROLE_LABEL, STATUS_LABEL, type ActivityKey, type Guild, type ItemDraft, type PowerTier, type Role } from '../lib/types';
+import { ACTIVITIES, BONUSES, KIND_LABEL, ROLE_LABEL, STATUS_LABEL, type ActivityKey, type Guild, type ItemDraft, type PowerTier, type Role } from '../lib/types';
 
-const TABS = ['신청 처리', '참여 기록', '문파원 관리', '전투력 갱신', '창고 관리', '문파 정보'] as const;
+const TABS = ['신청 처리', '참여 기록', '문파원 관리', '전투력·주간 결산', '창고 관리', '문파 정보'] as const;
 type Tab = (typeof TABS)[number];
 
 export function Admin() {
@@ -29,11 +30,22 @@ export function Admin() {
         {tab === '신청 처리' && <RequestsTab />}
         {tab === '참여 기록' && <ActivityTab />}
         {tab === '문파원 관리' && <MembersTab />}
-        {tab === '전투력 갱신' && <PowerImport />}
+        {tab === '전투력·주간 결산' && <PowerTab />}
         {tab === '창고 관리' && <ItemsTab />}
         {tab === '문파 정보' && <GuildTab />}
       </div>
     </MemberGate>
+  );
+}
+
+function PowerTab() {
+  // 스크린샷으로 저장하면 결산 미리보기를 새로 불러옴
+  const [saved, setSaved] = useState(0);
+  return (
+    <>
+      <PowerImport onSaved={() => setSaved((n) => n + 1)} />
+      <WeeklySettlement refreshKey={saved} />
+    </>
   );
 }
 
@@ -625,6 +637,26 @@ function GuildTab() {
                 disabled={!isMaster}
                 value={form.activity_points[a.key] ?? 0}
                 onChange={(e) => set('activity_points', { ...form.activity_points, [a.key]: num(e.target.value) })}
+              />
+            </label>
+          ))}
+        </section>
+
+        <section className="panel">
+          <h2 className="panel-title">주간 결산 보너스</h2>
+          <p className="muted small">전투력·주간 결산 탭에서 결산할 때 지급됩니다. 동점이면 모두 받고, 0점이면 지급하지 않습니다.</p>
+          {BONUSES.map((b) => (
+            <label key={b.key} className="field">
+              <span>
+                {b.icon} {b.label} <span className="muted small">— {b.desc}</span>
+              </span>
+              <input
+                className="input"
+                type="number"
+                min={0}
+                disabled={!isMaster}
+                value={form.weekly_bonus?.[b.key] ?? 0}
+                onChange={(e) => set('weekly_bonus', { ...form.weekly_bonus, [b.key]: num(e.target.value) })}
               />
             </label>
           ))}

@@ -1,5 +1,5 @@
 import { createClient, type Session as SbSession } from '@supabase/supabase-js';
-import type { Backend, Deck, GuestbookEntry, Item, ItemRequest, LedgerEntry, Member, Session } from './types';
+import type { Backend, Deck, GuestbookEntry, Item, ItemRequest, LedgerEntry, Member, PowerWeekRow, Session } from './types';
 
 const ERROR_HINTS: [RegExp, string][] = [
   [/Invalid login credentials/i, '이메일 또는 비밀번호가 맞지 않습니다'],
@@ -93,8 +93,7 @@ export function createSupabaseBackend(url: string, anonKey: string): Backend {
     },
     async updateMyProfile(patch) {
       // 본인이 닉네임을 정하면 '게임 닉네임 확정'으로 표시
-      const row = patch.nickname !== undefined ? { ...patch, nickname_confirmed: true } : patch;
-      const { error } = await sb.from('profiles').update(row).eq('id', await uid());
+      const { error } = await sb.from('profiles').update({ nickname: patch.nickname, nickname_confirmed: true }).eq('id', await uid());
       fail(error);
     },
     async adminUpdateMember(id, patch) {
@@ -112,6 +111,48 @@ export function createSupabaseBackend(url: string, anonKey: string): Backend {
     async grantPoints(memberIds, delta, kind, reason, activityDate) {
       const rows = memberIds.map((member_id) => ({ member_id, delta, kind, reason, activity_date: activityDate ?? null }));
       const { error } = await sb.from('point_ledger').insert(rows);
+      fail(error);
+    },
+
+    async listPowerWeeks() {
+      const weeks = await sb.from('power_settlements').select('week, settled_at').order('week', { ascending: false }).limit(12);
+      fail(weeks.error);
+      const list = weeks.data ?? [];
+      if (!list.length) return [];
+      const [rows, members] = await Promise.all([
+        sb.from('power_settlement_rows').select('*').in('week', list.map((w) => w.week)),
+        sb.from('profiles').select('id, nickname'),
+      ]);
+      fail(rows.error);
+      fail(members.error);
+      const nickById = new Map((members.data ?? []).map((m) => [m.id, m.nickname as string]));
+      return list.map((w) => ({
+        week: w.week as string,
+        settled_at: w.settled_at as string,
+        rows: (rows.data ?? [])
+          .filter((r) => r.week === w.week)
+          .map((r) => ({ member_id: r.member_id, nickname: nickById.get(r.member_id) ?? '(탈퇴)', prev_power: r.prev_power, power: r.power }))
+          .sort((a, b) => b.power - a.power),
+      }));
+    },
+    async previewPowerWeek(week) {
+      const [rows, members] = await Promise.all([
+        sb.rpc('power_week_preview', { p_week: week }),
+        sb.from('profiles').select('id, nickname'),
+      ]);
+      fail(rows.error);
+      fail(members.error);
+      const nickById = new Map((members.data ?? []).map((m) => [m.id, m.nickname as string]));
+      return ((rows.data ?? []) as Omit<PowerWeekRow, 'nickname'>[])
+        .map((r) => ({ ...r, nickname: nickById.get(r.member_id) ?? '-' }))
+        .sort((a, b) => b.power - a.power);
+    },
+    async settlePowerWeek(week) {
+      const { error } = await sb.rpc('settle_power_week', { p_week: week });
+      fail(error);
+    },
+    async cancelPowerWeek(week) {
+      const { error } = await sb.rpc('cancel_power_week', { p_week: week });
       fail(error);
     },
 

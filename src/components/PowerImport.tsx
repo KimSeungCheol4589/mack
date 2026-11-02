@@ -13,7 +13,7 @@ interface Row {
 }
 
 /** 운영진용: 게임 문파원 목록 스크린샷 여러 장으로 전체 전투력을 한 번에 갱신 */
-export function PowerImport() {
+export function PowerImport({ onSaved }: { onSaved?: () => void }) {
   const members = useLoad(() => api.listMembers());
   const [files, setFiles] = useState<File[]>([]);
   const [progress, setProgress] = useState<string | null>(null);
@@ -62,6 +62,7 @@ export function PowerImport() {
           <li>게임에서 문파원 목록을 열고, 닉네임과 전투력이 보이게 스크롤하며 여러 장 캡처합니다.</li>
           <li>아래에 파일을 고르거나 Ctrl+V 로 붙여 넣고 <strong>읽기</strong>를 누릅니다.</li>
           <li>읽은 값을 확인·수정한 뒤 저장합니다. 이미지는 이 브라우저에서만 처리되고 업로드되지 않습니다.</li>
+          <li>저장이 끝나면 아래 <strong>주간 결산</strong>으로 이번 주 최고 전투력·최고 성장 보너스를 줍니다.</li>
         </ol>
         <div className="row">
           <input ref={inputRef} type="file" accept="image/*" multiple hidden onChange={(e) => setFiles((f) => [...f, ...(e.target.files ?? [])])} />
@@ -111,6 +112,7 @@ export function PowerImport() {
                     }
                   }
                   members.reload();
+                  onSaved?.();
                   setRows((rs) => rs!.filter((r) => !toSave.includes(r) || failed.some((f) => f.startsWith(r.member.nickname + '('))));
                   if (failed.length) throw new Error(`${toSave.length - failed.length}명 저장, ${failed.length}명 실패: ${failed.join(', ')}`);
                 }, `${toSave.length}명의 전투력을 갱신했습니다`)

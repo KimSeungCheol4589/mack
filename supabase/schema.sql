@@ -8,6 +8,8 @@
 --   * 기여 점수 = 전투력 점수(전투력 구간별 자동) + 활동 점수(콘텐츠 참여) - 창고 사용
 --   * 활동: 요신 토벌령, 결계지 방어, 미혹의 정원, 신기 쟁탈전 — 각각 주 1회(수요일 초기화),
 --     운영진이 참여자를 기록합니다.
+--   * 전투력은 운영진이 게임 화면(스크린샷)으로 일괄 갱신하고, 매주 '주간 결산'으로
+--     최고 전투력·최고 성장 문파원에게 보너스 점수를 줍니다.
 --   * 창고 신청은 운영진이 승인할 때 재고와 점수가 차감됩니다.
 -- =====================================================================
 
@@ -35,6 +37,8 @@ create table public.guild (
   ]',
   -- 활동 1회 참여당 기본 점수 (기록할 때 바꿀 수 있음)
   activity_points jsonb not null default '{"yosin": 10, "barrier": 10, "garden": 20, "singi": 20}',
+  -- 주간 결산 보너스: 최고 전투력, 최고 성장
+  weekly_bonus jsonb not null default '{"top_power": 20, "top_growth": 30}',
   updated_at  timestamptz not null default now()
 );
 insert into public.guild (id) values (1);
@@ -65,25 +69,42 @@ language sql immutable as $$
   select d - ((extract(isodow from d)::int + 4) % 7);
 $$;
 
--- 점수 원장: 활동 참여(+), 창고 사용(-), 운영진 조정(±)
+-- 점수 원장: 활동 참여(+), 주간 보너스(+), 창고 사용(-), 운영진 조정(±)
 --   yosin=요신 토벌령, barrier=결계지 방어, garden=미혹의 정원, singi=신기 쟁탈전
---   각 활동은 주 1회: 같은 문파원·같은 활동·같은 주(수~화)에는 한 번만 기록됩니다.
+--   top_power=주간 최고 전투력, top_growth=주간 최고 성장 (주간 결산 RPC 전용)
+--   각 활동·보너스는 주 1회: 같은 문파원·같은 종류·같은 주(수~화)에는 한 번만 기록됩니다.
 create table public.point_ledger (
   id             bigint generated always as identity primary key,
   member_id      uuid not null references public.profiles on delete cascade,
   delta          int  not null check (delta <> 0),
-  kind           text not null check (kind in ('yosin', 'barrier', 'garden', 'singi', 'warehouse', 'adjust')),
+  kind           text not null check (kind in ('yosin', 'barrier', 'garden', 'singi', 'top_power', 'top_growth', 'warehouse', 'adjust')),
   reason         text not null default '',
   activity_date  date,
   activity_week  date generated always as (week_start(activity_date)) stored,
   created_by     uuid references public.profiles default auth.uid(),
   created_at     timestamptz not null default now(),
-  check ((kind in ('yosin', 'barrier', 'garden', 'singi')) = (activity_date is not null))
+  check ((kind in ('yosin', 'barrier', 'garden', 'singi', 'top_power', 'top_growth')) = (activity_date is not null))
 );
 create index point_ledger_member_idx on public.point_ledger (member_id);
 create unique index point_ledger_weekly_once
   on public.point_ledger (member_id, kind, activity_week)
   where activity_week is not null;
+
+-- 주간 결산: 그 주에 확정한 전투력 스냅샷
+create table public.power_settlements (
+  week        date primary key check (week = week_start(week)),
+  settled_at  timestamptz not null default now(),
+  settled_by  uuid references public.profiles default auth.uid()
+);
+
+create table public.power_settlement_rows (
+  week        date not null references public.power_settlements on delete cascade,
+  member_id   uuid not null references public.profiles on delete cascade,
+  -- 비교 기준 전투력 (지난 결산 값, 없으면 그 주 전에 마지막으로 기록된 값). 기준이 없으면 null → 성장 보너스 대상 아님
+  prev_power  bigint,
+  power       bigint not null,
+  primary key (week, member_id)
+);
 
 create table public.warehouse_items (
   id           uuid primary key default gen_random_uuid(),
@@ -209,6 +230,9 @@ begin
   if auth.uid() is null then
     return new;
   end if;
+  if new.combat_power is distinct from old.combat_power and not is_officer() then
+    raise exception '전투력은 운영진이 게임 화면으로 갱신합니다';
+  end if;
   -- 운영진은 문주의 전투력은 갱신할 수 있지만, 닉네임·직책·승인은 바꿀 수 없음
   if old.role = 'master' and old.id <> auth.uid() and not is_master()
      and (new.nickname is distinct from old.nickname
@@ -239,7 +263,8 @@ language plpgsql security definer set search_path = public as $$
 begin
   if auth.uid() is not null and not is_master()
      and (new.power_tiers is distinct from old.power_tiers
-          or new.activity_points is distinct from old.activity_points) then
+          or new.activity_points is distinct from old.activity_points
+          or new.weekly_bonus is distinct from old.weekly_bonus) then
     raise exception '점수 기준은 문주만 바꿀 수 있습니다';
   end if;
   new.updated_at := now();
@@ -251,7 +276,7 @@ create trigger guild_touch
   for each row execute function public.touch_guild();
 
 -- ---------------------------------------------------------------------
--- 문파원 요약 뷰 (전투력 점수, 활동 점수, 기여 점수, 7일 성장)
+-- 문파원 요약 뷰 (전투력 점수, 활동 점수, 기여 점수, 주간 성장 = 지난 결산 이후 변화)
 --   security_invoker: 보는 사람 권한으로 계산되므로 비로그인 방문자에게는 원장(활동·사용)이 0 으로 보입니다.
 -- ---------------------------------------------------------------------
 
@@ -269,13 +294,13 @@ select
   (power_score(p.combat_power)
     + coalesce((select sum(l.delta) from point_ledger l where l.member_id = p.id), 0))::bigint as points,
   (p.combat_power - coalesce(
+    (select r.power from power_settlement_rows r
+      where r.member_id = p.id order by r.week desc limit 1),
     (select h.combat_power from power_history h
-      where h.member_id = p.id and h.recorded_at <= now() - interval '7 days'
+      where h.member_id = p.id and h.combat_power > 0
+        and h.recorded_at < (week_start((now() at time zone 'Asia/Seoul')::date)::timestamp at time zone 'Asia/Seoul')
       order by h.recorded_at desc limit 1),
-    (select h.combat_power from power_history h
-      where h.member_id = p.id
-      order by h.recorded_at asc limit 1),
-    p.combat_power))::bigint as growth_7d,
+    p.combat_power))::bigint as growth_week,
   p.nickname_confirmed
 from profiles p;
 
@@ -423,6 +448,99 @@ end $$;
 revoke execute on function public.request_item(uuid, int, text) from anon;
 revoke execute on function public.decide_request(uuid, boolean) from anon;
 revoke execute on function public.cancel_request(uuid) from anon;
+
+-- ---------------------------------------------------------------------
+-- 주간 전투력 결산
+-- ---------------------------------------------------------------------
+
+alter table public.power_settlements     enable row level security;
+alter table public.power_settlement_rows enable row level security;
+create policy settlements_read      on public.power_settlements     for select to anon, authenticated using (true);
+create policy settlement_rows_read  on public.power_settlement_rows for select to anon, authenticated using (true);
+
+-- 이 주를 지금 결산하면 들어갈 값 (미리보기와 결산이 같은 계산을 씀)
+create or replace function public.power_week_preview(p_week date)
+returns table (member_id uuid, prev_power bigint, power bigint)
+language sql stable security definer set search_path = public as $$
+  select p.id,
+         coalesce(
+           (select r.power from power_settlement_rows r
+             where r.member_id = p.id and r.week < week_start(p_week)
+             order by r.week desc limit 1),
+           (select h.combat_power from power_history h
+             where h.member_id = p.id and h.combat_power > 0
+               and h.recorded_at < (week_start(p_week)::timestamp at time zone 'Asia/Seoul')
+             order by h.recorded_at desc limit 1)),
+         p.combat_power
+    from profiles p
+   where p.approved and p.combat_power > 0;
+$$;
+
+-- 주간 결산: 지금 전투력을 그 주 값으로 확정하고, 최고 전투력·최고 성장(동점은 모두)에게 보너스 지급
+create or replace function public.settle_power_week(p_week date) returns void
+language plpgsql security definer set search_path = public as $$
+declare
+  v_week  date := week_start(p_week);
+  v_bonus jsonb;
+  v_label text;
+  v_top   bigint;
+  v_grow  bigint;
+begin
+  if not is_officer() then
+    raise exception '운영진만 결산할 수 있습니다';
+  end if;
+  if v_week > week_start((now() at time zone 'Asia/Seoul')::date) then
+    raise exception '아직 시작하지 않은 주입니다';
+  end if;
+  perform pg_advisory_xact_lock(45890);
+  if exists (select 1 from power_settlements where week >= v_week) then
+    raise exception '이미 결산한 주이거나, 더 최근 주가 결산되어 있습니다';
+  end if;
+
+  insert into power_settlements (week) values (v_week);
+  insert into power_settlement_rows (week, member_id, prev_power, power)
+    select v_week, x.member_id, x.prev_power, x.power from power_week_preview(v_week) x;
+
+  select weekly_bonus into v_bonus from guild where id = 1;
+  v_label := to_char(v_week, 'FMMM/FMDD') || ' 주';
+
+  select max(r.power) into v_top from power_settlement_rows r where r.week = v_week;
+  if coalesce((v_bonus ->> 'top_power')::int, 0) > 0 and v_top is not null then
+    insert into point_ledger (member_id, delta, kind, reason, activity_date)
+      select r.member_id, (v_bonus ->> 'top_power')::int, 'top_power',
+             '주간 최고 전투력 ' || v_label || ' (' || to_char(r.power, 'FM999,999,999,999') || ')', v_week
+        from power_settlement_rows r where r.week = v_week and r.power = v_top;
+  end if;
+
+  select max(r.power - r.prev_power) into v_grow
+    from power_settlement_rows r where r.week = v_week and r.prev_power is not null;
+  if coalesce((v_bonus ->> 'top_growth')::int, 0) > 0 and v_grow > 0 then
+    insert into point_ledger (member_id, delta, kind, reason, activity_date)
+      select r.member_id, (v_bonus ->> 'top_growth')::int, 'top_growth',
+             '주간 최고 성장 ' || v_label || ' (+' || to_char(v_grow, 'FM999,999,999,999') || ')', v_week
+        from power_settlement_rows r
+       where r.week = v_week and r.prev_power is not null and r.power - r.prev_power = v_grow;
+  end if;
+end $$;
+
+-- 가장 최근 결산 취소 (잘못 읽은 전투력으로 결산했을 때): 보너스도 함께 회수
+create or replace function public.cancel_power_week(p_week date) returns void
+language plpgsql security definer set search_path = public as $$
+begin
+  if not is_officer() then
+    raise exception '운영진만 취소할 수 있습니다';
+  end if;
+  if not exists (select 1 from power_settlements where week = p_week)
+     or exists (select 1 from power_settlements where week > p_week) then
+    raise exception '가장 최근 결산만 취소할 수 있습니다';
+  end if;
+  delete from point_ledger where kind in ('top_power', 'top_growth') and activity_week = p_week;
+  delete from power_settlements where week = p_week;
+end $$;
+
+revoke execute on function public.power_week_preview(date) from anon;
+revoke execute on function public.settle_power_week(date) from anon;
+revoke execute on function public.cancel_power_week(date) from anon;
 
 -- =====================================================================
 -- 도술덱 · 방명록 · 방문자 수

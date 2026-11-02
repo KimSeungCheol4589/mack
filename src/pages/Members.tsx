@@ -2,16 +2,17 @@ import { useMemo, useState } from 'react';
 import { RoleBadge } from '../components/Layout';
 import { ScoreGuide } from '../components/ScoreGuide';
 import { WeeklyAttendance } from '../components/WeeklyAttendance';
+import { WeeklyAwards } from '../components/WeeklySettlement';
 import { api, fmt } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { useLoad } from '../lib/hooks';
 import type { Member } from '../lib/types';
 
-type SortKey = 'combat_power' | 'growth_7d' | 'activity_score' | 'points';
+type SortKey = 'combat_power' | 'growth_week' | 'activity_score' | 'points';
 
 const SORTS: { key: SortKey; label: string; memberOnly?: boolean }[] = [
   { key: 'combat_power', label: '전투력순' },
-  { key: 'growth_7d', label: '성장순' },
+  { key: 'growth_week', label: '성장순' },
   { key: 'activity_score', label: '활동 점수순', memberOnly: true },
   { key: 'points', label: '기여 점수순', memberOnly: true },
 ];
@@ -36,7 +37,7 @@ export function Members() {
     <div className="page">
       <div className="page-head">
         <h1>문파원</h1>
-        <p className="muted">전투력은 문파원이 직접 갱신하거나 운영진이 입력합니다. 성장은 최근 7일 증가량입니다.</p>
+        <p className="muted">전투력은 운영진이 매주 게임 문파원 목록 캡처로 갱신합니다. 주간 성장은 지난 주간 결산 이후 오른 양입니다.</p>
       </div>
 
       <div className="toolbar">
@@ -52,6 +53,8 @@ export function Members() {
 
       {members.error && <p className="error">{members.error}</p>}
 
+      <WeeklyAwards />
+
       <div className="panel table-wrap">
         <table className="table">
           <thead>
@@ -60,7 +63,7 @@ export function Members() {
               <th>닉네임</th>
               <th>직책</th>
               <th className="r">전투력</th>
-              <th className="r">7일 성장</th>
+              <th className="r">주간 성장</th>
               <th className="r">전투력 점수</th>
               {isMember && <th className="r">활동 점수</th>}
               {isMember && <th className="r">기여 점수</th>}
@@ -77,8 +80,8 @@ export function Members() {
                   <RoleBadge role={m.role} />
                 </td>
                 <td className="r num">{fmt(m.combat_power)}</td>
-                <td className={`r num ${m.growth_7d > 0 ? 'up' : 'muted'}`}>
-                  {m.growth_7d > 0 ? `▲ ${fmt(m.growth_7d)}` : m.growth_7d < 0 ? `▼ ${fmt(-m.growth_7d)}` : '-'}
+                <td className={`r num ${m.growth_week > 0 ? 'up' : 'muted'}`}>
+                  {m.growth_week > 0 ? `▲ ${fmt(m.growth_week)}` : m.growth_week < 0 ? `▼ ${fmt(-m.growth_week)}` : '-'}
                 </td>
                 <td className="r num">{fmt(m.power_score)}</td>
                 {isMember && <td className="r num">{fmt(m.activity_score)}</td>}

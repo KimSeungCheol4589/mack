@@ -3,8 +3,10 @@
 import {
   DEFAULT_ACTIVITY_POINTS,
   DEFAULT_POWER_TIERS,
+  DEFAULT_WEEKLY_BONUS,
   KIND_LABEL,
   powerScore,
+  weekWinners,
   type ActivityKey,
   type Backend,
   type Deck,
@@ -15,6 +17,7 @@ import {
   type LedgerEntry,
   type Member,
   type PointKind,
+  type PowerWeekRow,
   type RequestStatus,
   type Role,
   type Session,
@@ -44,11 +47,19 @@ interface RawRequest {
 
 type RawDeck = Omit<Deck, 'author_nickname' | 'like_count' | 'liked_by_me'>;
 
+type RawWeekRow = Omit<PowerWeekRow, 'nickname'>;
+interface RawWeek {
+  week: string;
+  settled_at: string;
+  rows: RawWeekRow[];
+}
+
 interface DemoState {
   guild: Guild;
   profiles: Profile[];
   history: { member_id: string; combat_power: number; recorded_at: string }[];
   ledger: LedgerEntry[];
+  powerWeeks: RawWeek[];
   items: Item[];
   requests: RawRequest[];
   decks: RawDeck[];
@@ -59,7 +70,7 @@ interface DemoState {
 }
 
 // 데이터 구조가 바뀌면 버전을 올려 예전 체험 데이터를 새로 시작합니다.
-const STORAGE_KEY = 'dokkaebi-guild-demo-v7';
+const STORAGE_KEY = 'dokkaebi-guild-demo-v8';
 const DAY = 86_400_000;
 
 export const DEMO_ACCOUNTS = [
@@ -76,6 +87,22 @@ function ago(days: number): string {
 
 function uid(): string {
   return Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+}
+
+/** 결산 보너스 원장 줄 (schema.sql 의 settle_power_week 와 같은 규칙) */
+function settlementLedger(week: string, rows: RawWeekRow[], bonus: Guild['weekly_bonus'], created_at: string): LedgerEntry[] {
+  const w = weekWinners(rows.map((r) => ({ ...r, nickname: '' })));
+  const label = `${shortDate(week)} 주`;
+  const out: LedgerEntry[] = [];
+  if (bonus.top_power > 0)
+    w.powerIds.forEach((member_id) =>
+      out.push({ id: uid(), member_id, delta: bonus.top_power, kind: 'top_power', reason: `주간 최고 전투력 ${label} (${w.topPower.toLocaleString('ko-KR')})`, activity_date: week, created_at }),
+    );
+  if (bonus.top_growth > 0)
+    w.growthIds.forEach((member_id) =>
+      out.push({ id: uid(), member_id, delta: bonus.top_growth, kind: 'top_growth', reason: `주간 최고 성장 ${label} (+${w.topGrowth.toLocaleString('ko-KR')})`, activity_date: week, created_at }),
+    );
+  return out;
 }
 
 function seed(): DemoState {
@@ -138,6 +165,19 @@ function seed(): DemoState {
   });
   add('member', -60, 'warehouse', '용맹의 강타 도술 조각 선택 상자 x1', 4);
 
+  // 2주 전 주간 결산 (그때 전투력 = 7일 전 값). 지난 주는 아직 결산 전이라 관리 화면에서 해 볼 수 있음
+  const settledWeek = addDays(thisWeek, -14);
+  const powerWeeks: RawWeek[] = [
+    {
+      week: settledWeek,
+      settled_at: ago(daysAgo(settledWeek) - 6),
+      rows: people
+        .filter(([, , , , , approved]) => approved)
+        .map(([id, , , , before], i) => ({ member_id: id, prev_power: before - 300 - ((i * 677) % 1900), power: before })),
+    },
+  ];
+  ledger.push(...settlementLedger(settledWeek, powerWeeks[0].rows, DEFAULT_WEEKLY_BONUS, powerWeeks[0].settled_at));
+
   // 문파 상점에서 사서 문파 창고에 넣어 둔 물품 (가격은 기여 점수 기준)
   const items: Item[] = [
     ['용맹의 강타 도술 조각 선택 상자', '도술 조각', 'img:skill-select', '강타 도술 조각 중 하나를 골라 받는 상자', 4, 60],
@@ -193,14 +233,16 @@ function seed(): DemoState {
       level: 7,
       motto: '함께 사냥하고, 함께 강해진다',
       notice:
-        '이번 주 토요일 밤 9시 신기 쟁탈전에 모두 모여 주세요. 참여하면 기여 점수 20점!\n전투력이 오르면 내 정보에서 꼭 갱신해 주세요. 전투력 구간이 오르면 기여 점수도 올라갑니다.',
+        '이번 주 토요일 밤 9시 신기 쟁탈전에 모두 모여 주세요. 참여하면 기여 점수 20점!\n전투력은 매주 화요일 밤 운영진이 문파원 목록 캡처로 갱신합니다. 주간 최고 전투력·최고 성장에게는 보너스 점수가 있어요.',
       recruiting: true,
       power_tiers: DEFAULT_POWER_TIERS,
       activity_points: DEFAULT_ACTIVITY_POINTS,
+      weekly_bonus: DEFAULT_WEEKLY_BONUS,
     },
     profiles,
     history,
     ledger,
+    powerWeeks,
     items,
     requests,
     decks,
@@ -282,12 +324,33 @@ export function createDemoBackend(): Backend {
     return p ? scoreOf(p) + sum(ledgerOf(id)) : 0;
   };
 
+  // 그 주 시작 전에 마지막으로 기록된 0 이 아닌 전투력
+  const powerBefore = (id: string, week: string) =>
+    state.history
+      .filter((h) => h.member_id === id && h.combat_power > 0 && h.recorded_at < new Date(`${week}T00:00:00`).toISOString())
+      .sort((a, b) => b.recorded_at.localeCompare(a.recorded_at))[0]?.combat_power;
+  // 그 주보다 앞선 가장 최근 결산 값
+  const lastSettled = (id: string, beforeWeek?: string) =>
+    [...state.powerWeeks]
+      .filter((w) => !beforeWeek || w.week < beforeWeek)
+      .sort((a, b) => b.week.localeCompare(a.week))
+      .map((w) => w.rows.find((r) => r.member_id === id)?.power)
+      .find((v) => v !== undefined);
+
+  function preview(week: string): PowerWeekRow[] {
+    return state.profiles
+      .filter((p) => p.approved && p.combat_power > 0)
+      .map((p) => ({
+        member_id: p.id,
+        nickname: p.nickname,
+        prev_power: lastSettled(p.id, week) ?? powerBefore(p.id, week) ?? null,
+        power: p.combat_power,
+      }))
+      .sort((a, b) => b.power - a.power);
+  }
+
   function overview(p: Profile): Member {
-    const hist = state.history
-      .filter((h) => h.member_id === p.id)
-      .sort((a, b) => a.recorded_at.localeCompare(b.recorded_at));
-    const cutoff = new Date(Date.now() - 7 * DAY).toISOString();
-    const before = [...hist].reverse().find((h) => h.recorded_at <= cutoff) ?? hist[0];
+    const base = lastSettled(p.id) ?? powerBefore(p.id, weekStart(today())) ?? p.combat_power;
     // Supabase 와 같게: 원장(활동·사용)은 문파원에게만 보입니다.
     const entries = isMember() ? ledgerOf(p.id) : [];
     return {
@@ -295,7 +358,7 @@ export function createDemoBackend(): Backend {
       power_score: scoreOf(p),
       activity_score: sum(entries.filter((l) => l.kind !== 'warehouse')),
       points: scoreOf(p) + sum(entries),
-      growth_7d: p.combat_power - (before?.combat_power ?? p.combat_power),
+      growth_week: p.combat_power - base,
       // 체험 계정은 닉네임을 정한 상태로 시작
       nickname_confirmed: true,
     };
@@ -363,7 +426,8 @@ export function createDemoBackend(): Backend {
       if (!isOfficer()) throw new Error('운영진만 수정할 수 있습니다');
       const rulesChanged =
         (patch.power_tiers && JSON.stringify(patch.power_tiers) !== JSON.stringify(state.guild.power_tiers)) ||
-        (patch.activity_points && JSON.stringify(patch.activity_points) !== JSON.stringify(state.guild.activity_points));
+        (patch.activity_points && JSON.stringify(patch.activity_points) !== JSON.stringify(state.guild.activity_points)) ||
+        (patch.weekly_bonus && JSON.stringify(patch.weekly_bonus) !== JSON.stringify(state.guild.weekly_bonus));
       if (rulesChanged && !isMaster()) throw new Error('점수 기준은 문주만 바꿀 수 있습니다');
       state.guild = { ...state.guild, ...patch };
       save();
@@ -382,13 +446,10 @@ export function createDemoBackend(): Backend {
       await tick();
       const p = me();
       if (!p) throw new Error('로그인이 필요합니다');
-      if (patch.nickname !== undefined) {
-        if (state.profiles.some((x) => x.id !== p.id && x.nickname === patch.nickname)) {
-          throw new Error('이미 사용 중인 닉네임입니다');
-        }
-        p.nickname = patch.nickname;
+      if (state.profiles.some((x) => x.id !== p.id && x.nickname === patch.nickname)) {
+        throw new Error('이미 사용 중인 닉네임입니다');
       }
-      if (patch.combat_power !== undefined) setPower(p, patch.combat_power);
+      p.nickname = patch.nickname;
       save();
     },
     async adminUpdateMember(id, patch) {
@@ -425,6 +486,7 @@ export function createDemoBackend(): Backend {
       await tick();
       if (!isOfficer()) throw new Error('운영진만 지급할 수 있습니다');
       if (kind === 'warehouse') throw new Error('창고 차감은 신청 승인으로만 처리됩니다');
+      if (kind === 'top_power' || kind === 'top_growth') throw new Error('주간 보너스는 주간 결산으로만 지급됩니다');
       const isActivity = kind !== 'adjust';
       if (isActivity !== !!activityDate) throw new Error('활동 기록에는 참여 날짜가 필요합니다');
       if (isActivity) {
@@ -438,6 +500,41 @@ export function createDemoBackend(): Backend {
       memberIds.forEach((member_id) =>
         state.ledger.push({ id: uid(), member_id, delta, kind, reason, activity_date: isActivity ? activityDate! : null, created_at: now }),
       );
+      save();
+    },
+
+    async listPowerWeeks() {
+      await tick();
+      const nick = (id: string) => state.profiles.find((p) => p.id === id)?.nickname ?? '(탈퇴)';
+      return [...state.powerWeeks]
+        .sort((a, b) => b.week.localeCompare(a.week))
+        .slice(0, 12)
+        .map((w) => ({ ...w, rows: w.rows.map((r) => ({ ...r, nickname: nick(r.member_id) })).sort((a, b) => b.power - a.power) }));
+    },
+    async previewPowerWeek(week) {
+      await tick();
+      return preview(weekStart(week));
+    },
+    async settlePowerWeek(date) {
+      await tick();
+      if (!isOfficer()) throw new Error('운영진만 결산할 수 있습니다');
+      const week = weekStart(date);
+      if (week > weekStart(today())) throw new Error('아직 시작하지 않은 주입니다');
+      if (state.powerWeeks.some((w) => w.week >= week)) throw new Error('이미 결산한 주이거나, 더 최근 주가 결산되어 있습니다');
+      const now = new Date().toISOString();
+      const rows = preview(week).map(({ nickname: _, ...r }) => r);
+      state.powerWeeks.push({ week, settled_at: now, rows });
+      state.ledger.push(...settlementLedger(week, rows, state.guild.weekly_bonus, now));
+      save();
+    },
+    async cancelPowerWeek(week) {
+      await tick();
+      if (!isOfficer()) throw new Error('운영진만 취소할 수 있습니다');
+      if (!state.powerWeeks.some((w) => w.week === week) || state.powerWeeks.some((w) => w.week > week)) {
+        throw new Error('가장 최근 결산만 취소할 수 있습니다');
+      }
+      state.powerWeeks = state.powerWeeks.filter((w) => w.week !== week);
+      state.ledger = state.ledger.filter((l) => !((l.kind === 'top_power' || l.kind === 'top_growth') && l.activity_date === week));
       save();
     },
 

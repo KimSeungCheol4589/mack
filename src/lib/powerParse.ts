@@ -92,16 +92,3 @@ export function matchPowers(rows: OcrRow[], members: Member[], minPower = 1000):
   });
   return { matches: [...best.values()], unmatched };
 }
-
-/** 내 캐릭터 화면: '전투력' 글자가 있는 행(또는 그 아래 행)의 숫자를 먼저, 나머지 큰 숫자를 뒤에 */
-export function powerCandidates(rows: OcrRow[], minPower = 1000): number[] {
-  const near: number[] = [];
-  rows.forEach((r, i) => {
-    if (/전\s*투\s*력/.test(r.text)) {
-      near.push(...findNumbers(r.text), ...findNumbers(rows[i + 1]?.text ?? ''));
-    }
-  });
-  const all = rows.flatMap((r) => findNumbers(r.text));
-  const uniq = [...new Set([...near, ...all.sort((a, b) => b - a)])];
-  return uniq.filter((n) => n >= minPower).slice(0, 6);
-}
