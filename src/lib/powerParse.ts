@@ -97,3 +97,27 @@ export function matchPowers<T extends Named>(rows: OcrRow[], members: T[], minPo
   });
   return { matches: [...best.values()], unmatched };
 }
+
+export interface NameMatch<T extends Named = Named> {
+  member: T;
+  score: number;
+  rowText: string;
+}
+
+/**
+ * 콘텐츠·디코 참여자 스크린샷에서 명단의 닉네임을 찾습니다. 숫자 단서가 없으니 전투력보다 엄격하게 봅니다
+ * (두 글자 이하는 정확히 같아야, 그 밖에는 80% 이상 비슷해야 찾은 것으로 봄).
+ */
+export function matchNames<T extends Named>(rows: OcrRow[], members: T[]): NameMatch<T>[] {
+  const out: NameMatch<T>[] = [];
+  for (const m of members) {
+    let best: NameMatch<T> | null = null;
+    for (const row of rows) {
+      const score = nicknameScore(row.text, m.nickname);
+      if (!best || score > best.score) best = { member: m, score, rowText: row.text };
+    }
+    const threshold = normalize(m.nickname).length <= 2 ? 0.99 : 0.8;
+    if (best && best.score >= threshold) out.push(best);
+  }
+  return out;
+}

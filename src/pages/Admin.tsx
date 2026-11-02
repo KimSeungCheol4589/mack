@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { ActivityImport } from '../components/ActivityImport';
 import { ITEM_IMAGES, ITEM_IMAGE_LABEL, ItemIcon } from '../components/ItemIcon';
 import { MemberGate, RoleBadge } from '../components/Layout';
 import { PowerImport } from '../components/PowerImport';
@@ -128,9 +129,11 @@ function RequestsTab() {
 }
 
 function ActivityTab() {
+  const [version, setVersion] = useState(0);
   return (
     <>
-      <RosterSheet editable />
+      <ActivityImport onSaved={() => setVersion((v) => v + 1)} />
+      <RosterSheet key={version} editable />
       <CoinAdjust />
     </>
   );
