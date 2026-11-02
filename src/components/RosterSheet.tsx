@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { api, fmt } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { useAction, useLoad } from '../lib/hooks';
-import { ACTIVITIES, RANKS, activityPoints, type ActivityKey, type RosterMember, type WeekActivities } from '../lib/types';
+import { ACTIVITIES, RANKS, activityPoints, type ActivityKey, type Rank, type RosterMember, type WeekActivities } from '../lib/types';
 import { addDays, today, weekLabel, weekStart } from '../lib/week';
 
 type SortKey = 'rank' | 'combat_power' | 'growth' | 'points' | 'earned' | 'coins';
@@ -99,6 +99,7 @@ export function RosterSheet({ editable = false, onChanged }: { editable?: boolea
         </div>
         <input className="input" placeholder="닉네임 검색" value={query} onChange={(e) => setQuery(e.target.value)} />
       </div>
+      {editable && <QuickAdd existing={roster.data ?? []} initial={rows.length ? '' : query.trim()} onAdded={() => { roster.reload(); onChanged?.(); }} />}
       {editable && <p className="muted small">칸을 누르면 바로 저장됩니다. 디코는 참여 횟수를 적으세요. 결산한 주는 고쳐도 이미 나눈 엽전은 바뀌지 않습니다.</p>}
 
       {roster.error && <p className="error">{roster.error}</p>}
@@ -199,5 +200,52 @@ export function RosterSheet({ editable = false, onChanged }: { editable?: boolea
       {!roster.data && !roster.error && <p className="muted center pad">불러오는 중…</p>}
       {!isMember && <p className="muted small">콘텐츠 참여와 엽전은 로그인한 문파원에게만 보입니다.</p>}
     </section>
+  );
+}
+
+/** 운영진용: 가입하지 않은 신규 문파원을 표에서 바로 명단에 추가 (쉼표·줄바꿈으로 여러 명) */
+function QuickAdd({ existing, initial, onAdded }: { existing: RosterMember[]; initial: string; onAdded: () => void }) {
+  const [names, setNames] = useState('');
+  const [rank, setRank] = useState<Rank>('문파원');
+  const { busy, run } = useAction();
+  const text = names || initial;
+  const list = [...new Set(text.split(/[,\n]/).map((n) => n.trim()).filter(Boolean))];
+  const dup = list.filter((n) => existing.some((m) => m.nickname === n));
+  const fresh = list.filter((n) => !dup.includes(n));
+
+  return (
+    <form
+      className="quick-add"
+      onSubmit={(e) => {
+        e.preventDefault();
+        run(async () => {
+          for (const nickname of fresh) await api.saveRoster({ nickname, rank, combat_power: 0, active: true });
+        }, `${fresh.join(', ')} 님을 명단에 추가했습니다`).then((ok) => {
+          if (ok) {
+            setNames('');
+            onAdded();
+          }
+        });
+      }}
+    >
+      <span className="small strong">+ 신규 문파원</span>
+      <input
+        className="input"
+        placeholder="게임 닉네임 (여러 명은 쉼표로)"
+        maxLength={200}
+        value={text}
+        onChange={(e) => setNames(e.target.value)}
+        aria-label="추가할 닉네임"
+      />
+      <select className="input" style={{ width: 'auto' }} value={rank} onChange={(e) => setRank(e.target.value as Rank)} aria-label="직위">
+        {RANKS.map((r) => (
+          <option key={r}>{r}</option>
+        ))}
+      </select>
+      <button className="btn btn-small btn-red" disabled={busy || !fresh.length}>
+        {fresh.length > 1 ? `${fresh.length}명 추가` : '추가'}
+      </button>
+      {dup.length > 0 && <span className="muted small">이미 명단에 있음: {dup.join(', ')}</span>}
+    </form>
   );
 }

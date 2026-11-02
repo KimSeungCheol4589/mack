@@ -492,3 +492,6 @@ textarea.input { resize: vertical; }
 .short-table { max-height: 320px; overflow: auto; }
 .mono { font-family: ui-monospace, Consolas, monospace; font-size: 12px; white-space: pre; }
 .danger-btn { color: var(--down); margin-right: auto; }
+
+.quick-add { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 10px; }
+.quick-add input.input { flex: 1 1 220px; }
