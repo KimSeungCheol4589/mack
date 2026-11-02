@@ -1,5 +1,4 @@
 import { Link } from 'react-router-dom';
-import { RoleBadge } from '../components/Layout';
 import { Hero } from '../components/Hero';
 import { ScoreGuide } from '../components/ScoreGuide';
 import { WeeklyAwards } from '../components/WeeklySettlement';
@@ -10,14 +9,14 @@ import { useLoad } from '../lib/hooks';
 export function Home() {
   const { session } = useAuth();
   const guild = useLoad(() => api.getGuild());
-  const members = useLoad(() => api.listMembers(), [session?.userId]);
+  const members = useLoad(() => api.listRoster(), [session?.userId]);
 
   const g = guild.data;
-  const list = (members.data ?? []).filter((m) => m.approved);
+  const list = (members.data ?? []).filter((m) => m.active);
   const total = list.reduce((s, m) => s + m.combat_power, 0);
-  const growth = list.reduce((s, m) => s + Math.max(0, m.growth_week), 0);
+  const growth = list.reduce((s, m) => s + Math.max(0, m.growth), 0);
   const top = list.slice(0, 5);
-  const risers = list.filter((m) => m.growth_week > 0).sort((a, b) => b.growth_week - a.growth_week).slice(0, 3);
+  const risers = list.filter((m) => m.growth > 0).sort((a, b) => b.growth - a.growth).slice(0, 3);
 
   return (
     <>
@@ -69,7 +68,7 @@ export function Home() {
                 <li key={m.id}>
                   <span className={`rank rank-${i + 1}`}>{i + 1}</span>
                   <span className="rank-name">
-                    {m.nickname} <RoleBadge role={m.role} />
+                    {m.nickname} {m.rank !== '문파원' && <span className="muted small">{m.rank}</span>}
                   </span>
                   <span className="num">{fmt(m.combat_power)}</span>
                 </li>
@@ -90,7 +89,7 @@ export function Home() {
               <div key={m.id} className="riser">
                 <span className="riser-medal">{['🥇', '🥈', '🥉'][i]}</span>
                 <strong>{m.nickname}</strong>
-                <span className="up">▲ {fmt(m.growth_week)}</span>
+                <span className="up">▲ {fmt(m.growth)}</span>
               </div>
             ))}
           </div>
@@ -101,10 +100,10 @@ export function Home() {
         {g && <ScoreGuide guild={g} />}
 
         <section className="features">
-          <Feature icon="👹" title="문파원 & 전투력" text="닉네임, 직책, 전투력과 주간 성장을 한눈에 봅니다. 전투력은 운영진이 매주 갱신합니다." to="/members" />
-          <Feature icon="🏮" title="기여 점수" text="전투력 구간 점수에 콘텐츠 참여 점수, 주간 최고 전투력·최고 성장 보너스가 더해집니다." to="/me" />
+          <Feature icon="👹" title="문파원 현황" text="직위, 전투력과 주간 성장, 콘텐츠 참여와 누적 엽전을 한눈에 봅니다. 전투력은 매주 수요일 갱신합니다." to="/members" />
+          <Feature icon="🪙" title="문파 엽전" text="한 주에 모인 문파 엽전을 참여 점수 비율로 나누고, 최고 전투력·최고 성장에게 보너스를 줍니다." to="/me" />
           <Feature icon="📜" title="도술덱" text="문파원이 쓰는 도술 조합을 올리고 추천합니다. 운영진이 고른 문파 추천 덱도 있어요." to="/decks" />
-          <Feature icon="📦" title="문파창고" text="모은 기여 점수로 창고 아이템을 신청하고, 운영진이 지급합니다." to="/warehouse" />
+          <Feature icon="📦" title="문파창고" text="모은 엽전으로 창고 아이템을 신청하고, 운영진이 지급합니다." to="/warehouse" />
           <Feature icon="✍️" title="방명록" text="문파원도, 지나가는 손님도 한마디 남길 수 있습니다." to="/guestbook" />
         </section>
       </div>

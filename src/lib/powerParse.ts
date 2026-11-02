@@ -1,6 +1,11 @@
 // 스크린샷에서 읽은 글자에서 닉네임과 전투력을 찾아냅니다.
 import type { OcrRow } from './ocr';
-import type { Member } from './types';
+
+/** 닉네임으로 찾을 대상 (명단) */
+export interface Named {
+  id: string;
+  nickname: string;
+}
 
 /** '48,210' '48.210' '48210' '241.65K' '1.2M' 같은 숫자를 찾습니다. (OCR 이 쉼표를 마침표로 읽는 경우 포함) */
 export function findNumbers(text: string): number[] {
@@ -57,8 +62,8 @@ export function nicknameScore(rowText: string, nickname: string): number {
   return best;
 }
 
-export interface PowerMatch {
-  member: Member;
+export interface PowerMatch<T extends Named = Named> {
+  member: T;
   value: number;
   score: number;
   rowText: string;
@@ -69,11 +74,11 @@ export interface PowerMatch {
  * 각 행에서 가장 비슷한 닉네임을 찾고, 그 행(없으면 바로 아래 행)의 가장 큰 숫자를 전투력으로 봅니다.
  * minPower 보다 작은 숫자(레벨, 순위 등)는 전투력 후보에서 뺍니다.
  */
-export function matchPowers(rows: OcrRow[], members: Member[], minPower = 1000): { matches: PowerMatch[]; unmatched: string[] } {
-  const best = new Map<string, PowerMatch>();
+export function matchPowers<T extends Named>(rows: OcrRow[], members: T[], minPower = 1000): { matches: PowerMatch<T>[]; unmatched: string[] } {
+  const best = new Map<string, PowerMatch<T>>();
   const unmatched: string[] = [];
   rows.forEach((row, i) => {
-    let top: { member: Member; score: number } | null = null;
+    let top: { member: T; score: number } | null = null;
     for (const m of members) {
       const score = nicknameScore(row.text, m.nickname);
       if (!top || score > top.score) top = { member: m, score };

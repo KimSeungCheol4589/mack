@@ -1,33 +1,18 @@
 import { fmt } from '../lib/api';
 import { ACTIVITIES, BONUSES, type Guild } from '../lib/types';
 
-/** 기여 점수 계산 기준표: 전투력 구간 점수 + 활동 참여 점수 + 주간 결산 보너스 */
+/** 엽전 분배 기준표: 콘텐츠 참여 점수 비율로 그 주 문파 엽전을 나누고, 주간 보너스를 더함 */
 export function ScoreGuide({ guild }: { guild: Guild }) {
-  const tiers = [...guild.power_tiers].sort((a, b) => b.min - a.min);
   return (
     <section className="panel">
-      <h2 className="panel-title">🏮 기여 점수 기준</h2>
+      <h2 className="panel-title">🪙 문파 엽전 분배 기준</h2>
       <p className="formula">
-        기여 점수 = <strong>전투력 점수</strong> + <strong>활동 점수</strong>(참여 + 주간 보너스) − 창고 사용
+        내 분배 엽전 = 그 주 문파 엽전 × <strong>내 점수</strong> ÷ <strong>모든 문파원 점수 합계</strong> <span className="muted small">(1전 미만 버림)</span>
       </p>
       <div className="guide-grid">
         <div>
-          <h3 className="guide-title">전투력 점수</h3>
-          <p className="muted small">운영진이 매주 갱신하는 전투력 구간에 따라 자동으로 매겨집니다.</p>
-          <table className="table guide-table">
-            <tbody>
-              {tiers.map((t, i) => (
-                <tr key={i}>
-                  <td>{i === tiers.length - 1 && t.min === 0 ? `${fmt(tiers[i - 1]?.min ?? 0)} 미만` : `${fmt(t.min)} 이상`}</td>
-                  <td className="r num strong">{fmt(t.points)}점</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        <div>
-          <h3 className="guide-title">활동 점수</h3>
-          <p className="muted small">각 콘텐츠는 일주일(수요일 시작)에 한 번이며, 참여하면 운영진이 기록합니다. 주간 보너스는 매주 전투력 결산 때 지급됩니다.</p>
+          <h3 className="guide-title">참여 점수</h3>
+          <p className="muted small">한 주는 수요일에 시작합니다. 콘텐츠는 주 1회, 디코는 참여한 횟수만큼 점수를 받습니다. 운영진이 기록합니다.</p>
           <table className="table guide-table">
             <tbody>
               {ACTIVITIES.map((a) => (
@@ -35,20 +20,31 @@ export function ScoreGuide({ guild }: { guild: Guild }) {
                   <td>
                     {a.icon} {a.label}
                   </td>
-                  <td className="r num strong">+{fmt(guild.activity_points[a.key] ?? 0)}점 / 주</td>
+                  <td className="r num strong">
+                    {fmt(guild.activity_points[a.key] ?? 0)}점 {a.multi ? '/ 1회' : '/ 주'}
+                  </td>
                 </tr>
               ))}
+            </tbody>
+          </table>
+        </div>
+        <div>
+          <h3 className="guide-title">주간 보너스</h3>
+          <p className="muted small">매주 수요일 운영진이 문파원 목록 캡처로 전투력을 갱신하고 결산할 때 지급됩니다. 동점이면 모두 받습니다.</p>
+          <table className="table guide-table">
+            <tbody>
               {BONUSES.map((b) => (
                 <tr key={b.key}>
                   <td>
                     {b.icon} {b.label}
                     <div className="muted small">{b.desc}</div>
                   </td>
-                  <td className="r num strong">+{fmt(guild.weekly_bonus?.[b.key] ?? 0)}점 / 주</td>
+                  <td className="r num strong">+{fmt(guild.weekly_bonus?.[b.key] ?? 0)}전</td>
                 </tr>
               ))}
             </tbody>
           </table>
+          <p className="muted small">모은 엽전은 문파창고 물품을 신청할 때 씁니다.</p>
         </div>
       </div>
     </section>

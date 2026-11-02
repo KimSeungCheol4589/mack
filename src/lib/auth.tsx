@@ -1,11 +1,13 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
 import { api } from './api';
-import type { Member, Session } from './types';
+import type { Member, RosterMember, Session } from './types';
 
 interface AuthState {
   ready: boolean;
   session: Session | null;
   me: Member | null;
+  /** 내 계정과 연결된 명단 (보유 엽전 등) */
+  myRoster: RosterMember | null;
   isMember: boolean;
   isOfficer: boolean;
   isMaster: boolean;
@@ -18,10 +20,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [ready, setReady] = useState(false);
   const [session, setSession] = useState<Session | null>(null);
   const [me, setMe] = useState<Member | null>(null);
+  const [myRoster, setMyRoster] = useState<RosterMember | null>(null);
 
   const loadMe = useCallback(async (s: Session | null) => {
     setSession(s);
-    setMe(s ? await api.getMember(s.userId).catch(() => null) : null);
+    const m = s ? await api.getMember(s.userId).catch(() => null) : null;
+    setMe(m);
+    setMyRoster(m?.approved ? ((await api.listRoster().catch(() => [])).find((r) => r.profile_id === m.id && r.active) ?? null) : null);
     setReady(true);
     // 구글 로그인에서 돌아온 '?code=...' 를 주소창에서 지움 (# 뒤 화면 주소는 그대로)
     if (s && new URLSearchParams(window.location.search).has('code')) {
@@ -42,6 +47,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     ready,
     session,
     me,
+    myRoster,
     isMember,
     isOfficer: isMember && (me!.role === 'master' || me!.role === 'officer'),
     isMaster: isMember && me!.role === 'master',

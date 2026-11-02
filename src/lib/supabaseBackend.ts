@@ -1,5 +1,9 @@
 import { createClient, type Session as SbSession } from '@supabase/supabase-js';
-import type { Backend, Deck, GuestbookEntry, Item, ItemRequest, LedgerEntry, Member, PowerWeekRow, Session } from './types';
+import type {
+  ActivityKey, Backend, CoinEntry, Deck, GuestbookEntry, Item, ItemRequest, Member, RosterMember, Session, SettlementRow, WeekActivities,
+} from './types';
+
+const PROFILE_COLS = 'id, nickname, role, approved, joined_at, nickname_confirmed';
 
 const ERROR_HINTS: [RegExp, string][] = [
   [/Invalid login credentials/i, '이메일 또는 비밀번호가 맞지 않습니다'],
@@ -8,7 +12,9 @@ const ERROR_HINTS: [RegExp, string][] = [
   [/Database error saving new user/i, '이미 사용 중인 닉네임일 수 있습니다'],
   [/Password should be at least/i, '비밀번호는 6자 이상이어야 합니다'],
   [/profiles_nickname_key/i, '이미 사용 중인 닉네임입니다'],
-  [/point_ledger_weekly_once/i, '이번 주에 이미 기록된 문파원이 있습니다. 새로고침 후 다시 확인해 주세요'],
+  [/roster_nickname_key/i, '이미 명단에 있는 닉네임입니다'],
+  [/roster_profile_id_key/i, '이 계정은 이미 다른 명단과 연결되어 있습니다'],
+  [/coin_ledger_weekly_once/i, '이미 결산된 주입니다. 새로고침 후 다시 확인해 주세요'],
 ];
 
 function fail(error: { message: string } | null): void {
@@ -29,6 +35,12 @@ export function createSupabaseBackend(url: string, anonKey: string): Backend {
     const { data } = await sb.auth.getSession();
     if (!data.session) throw new Error('로그인이 필요합니다');
     return data.session.user.id;
+  }
+
+  async function rosterNames(): Promise<Map<string, string>> {
+    const { data, error } = await sb.from('roster').select('id, nickname');
+    fail(error);
+    return new Map((data ?? []).map((m) => [m.id as string, m.nickname as string]));
   }
 
   return {
@@ -79,21 +91,18 @@ export function createSupabaseBackend(url: string, anonKey: string): Backend {
     },
 
     async listMembers() {
-      const { data, error } = await sb
-        .from('member_overview')
-        .select('*')
-        .order('combat_power', { ascending: false });
+      const { data, error } = await sb.from('profiles').select(PROFILE_COLS).order('joined_at');
       fail(error);
       return (data ?? []) as Member[];
     },
     async getMember(id) {
-      const { data, error } = await sb.from('member_overview').select('*').eq('id', id).maybeSingle();
+      const { data, error } = await sb.from('profiles').select(PROFILE_COLS).eq('id', id).maybeSingle();
       fail(error);
       return data as Member | null;
     },
     async updateMyProfile(patch) {
-      // 본인이 닉네임을 정하면 '게임 닉네임 확정'으로 표시
-      const { error } = await sb.from('profiles').update({ nickname: patch.nickname, nickname_confirmed: true }).eq('id', await uid());
+      // 본인이 닉네임을 정하면 '게임 닉네임 확정'으로 표시 (같은 닉네임의 명단과 자동 연결)
+      const { error } = await sb.from('profiles').update({ nickname: patch.nickname.trim(), nickname_confirmed: true }).eq('id', await uid());
       fail(error);
     },
     async adminUpdateMember(id, patch) {
@@ -101,58 +110,116 @@ export function createSupabaseBackend(url: string, anonKey: string): Backend {
       fail(error);
     },
 
-    async listLedger(memberId) {
-      let q = sb.from('point_ledger').select('*').order('created_at', { ascending: false }).limit(300);
-      if (memberId) q = q.eq('member_id', memberId);
-      const { data, error } = await q;
+    async listRoster() {
+      const { data, error } = await sb.from('roster_overview').select('*').order('combat_power', { ascending: false });
       fail(error);
-      return (data ?? []).map((r) => ({ ...r, id: String(r.id) })) as LedgerEntry[];
+      return (data ?? []) as RosterMember[];
     },
-    async grantPoints(memberIds, delta, kind, reason, activityDate) {
-      const rows = memberIds.map((member_id) => ({ member_id, delta, kind, reason, activity_date: activityDate ?? null }));
-      const { error } = await sb.from('point_ledger').insert(rows);
+    async saveRoster({ id, ...fields }) {
+      const row = { ...fields, nickname: fields.nickname.trim() };
+      const { error } = id ? await sb.from('roster').update(row).eq('id', id) : await sb.from('roster').insert(row);
+      fail(error);
+    },
+    async deleteRoster(id) {
+      const { error } = await sb.from('roster').delete().eq('id', id);
+      fail(error);
+    },
+    async linkRoster(rosterId, profileId) {
+      const { error } = await sb.from('roster').update({ profile_id: profileId }).eq('id', rosterId);
+      fail(error);
+    },
+    async importRoster(rows) {
+      const before = await sb.from('roster_overview').select('id, nickname, coins');
+      fail(before.error);
+      const existing = new Map((before.data ?? []).map((r) => [r.nickname as string, r]));
+      const { data, error } = await sb
+        .from('roster')
+        .upsert(rows.map((r) => ({ nickname: r.nickname.trim(), rank: r.rank, combat_power: r.combat_power })), { onConflict: 'nickname' })
+        .select('id, nickname');
+      fail(error);
+      const idByNick = new Map((data ?? []).map((r) => [r.nickname as string, r.id as string]));
+      const adjust = rows
+        .filter((r) => r.coins !== null)
+        .map((r) => ({
+          roster_id: idByNick.get(r.nickname.trim())!,
+          delta: r.coins! - Number(existing.get(r.nickname.trim())?.coins ?? 0),
+          kind: 'adjust',
+          reason: '명단 가져오기 (누적엽전 맞춤)',
+        }))
+        .filter((r) => r.roster_id && r.delta !== 0);
+      if (adjust.length) fail((await sb.from('coin_ledger').insert(adjust)).error);
+      const added = rows.filter((r) => !existing.has(r.nickname.trim())).length;
+      return { added, updated: rows.length - added };
+    },
+    async setPowers(updates) {
+      const results = await Promise.all(updates.map((u) => sb.from('roster').update({ combat_power: u.combat_power }).eq('id', u.id)));
+      results.forEach((r) => fail(r.error));
+    },
+
+    async listActivities(week) {
+      const { data, error } = await sb.from('activities').select('roster_id, kind, count').eq('week', week);
+      fail(error);
+      const out: WeekActivities = {};
+      for (const a of data ?? []) (out[a.roster_id] ??= {})[a.kind as ActivityKey] = a.count;
+      return out;
+    },
+    async setActivity(rosterId, kind, week, count) {
+      const { error } =
+        count > 0
+          ? await sb.from('activities').upsert({ roster_id: rosterId, kind, week, count }, { onConflict: 'roster_id,kind,week' })
+          : await sb.from('activities').delete().eq('roster_id', rosterId).eq('kind', kind).eq('week', week);
       fail(error);
     },
 
-    async listPowerWeeks() {
-      const weeks = await sb.from('power_settlements').select('week, settled_at').order('week', { ascending: false }).limit(12);
+    async listCoins(rosterId) {
+      let q = sb.from('coin_ledger').select('*').order('created_at', { ascending: false }).limit(500);
+      if (rosterId) q = q.eq('roster_id', rosterId);
+      const { data, error } = await q;
+      fail(error);
+      return (data ?? []).map((r) => ({ ...r, id: String(r.id) })) as CoinEntry[];
+    },
+    async adjustCoins(rosterIds, delta, reason) {
+      const { error } = await sb.from('coin_ledger').insert(rosterIds.map((roster_id) => ({ roster_id, delta, kind: 'adjust', reason })));
+      fail(error);
+    },
+
+    async listSettlements() {
+      const weeks = await sb.from('settlements').select('*').order('week', { ascending: false }).limit(12);
       fail(weeks.error);
       const list = weeks.data ?? [];
       if (!list.length) return [];
-      const [rows, members] = await Promise.all([
-        sb.from('power_settlement_rows').select('*').in('week', list.map((w) => w.week)),
-        sb.from('profiles').select('id, nickname'),
+      const [rows, nicks] = await Promise.all([
+        sb.from('settlement_rows').select('*').in('week', list.map((w) => w.week)),
+        rosterNames(),
       ]);
       fail(rows.error);
-      fail(members.error);
-      const nickById = new Map((members.data ?? []).map((m) => [m.id, m.nickname as string]));
       return list.map((w) => ({
         week: w.week as string,
+        pool: w.pool as number,
+        total_points: w.total_points as number,
         settled_at: w.settled_at as string,
         rows: (rows.data ?? [])
           .filter((r) => r.week === w.week)
-          .map((r) => ({ member_id: r.member_id, nickname: nickById.get(r.member_id) ?? '(탈퇴)', prev_power: r.prev_power, power: r.power }))
-          .sort((a, b) => b.power - a.power),
+          .map((r) => ({
+            roster_id: r.roster_id, nickname: nicks.get(r.roster_id) ?? '(삭제됨)',
+            prev_power: r.prev_power, power: r.power, points: r.points, share: r.share,
+          }))
+          .sort((a, b) => b.points - a.points || b.power - a.power),
       }));
     },
-    async previewPowerWeek(week) {
-      const [rows, members] = await Promise.all([
-        sb.rpc('power_week_preview', { p_week: week }),
-        sb.from('profiles').select('id, nickname'),
-      ]);
+    async previewWeek(week) {
+      const [rows, nicks] = await Promise.all([sb.rpc('week_preview', { p_week: week }), rosterNames()]);
       fail(rows.error);
-      fail(members.error);
-      const nickById = new Map((members.data ?? []).map((m) => [m.id, m.nickname as string]));
-      return ((rows.data ?? []) as Omit<PowerWeekRow, 'nickname'>[])
-        .map((r) => ({ ...r, nickname: nickById.get(r.member_id) ?? '-' }))
-        .sort((a, b) => b.power - a.power);
+      return ((rows.data ?? []) as Omit<SettlementRow, 'nickname' | 'share'>[])
+        .map((r) => ({ ...r, nickname: nicks.get(r.roster_id) ?? '-', share: 0 }))
+        .sort((a, b) => b.points - a.points || b.power - a.power);
     },
-    async settlePowerWeek(week) {
-      const { error } = await sb.rpc('settle_power_week', { p_week: week });
+    async settleWeek(week, pool) {
+      const { error } = await sb.rpc('settle_week', { p_week: week, p_pool: pool });
       fail(error);
     },
-    async cancelPowerWeek(week) {
-      const { error } = await sb.rpc('cancel_power_week', { p_week: week });
+    async cancelSettlement(week) {
+      const { error } = await sb.rpc('cancel_settlement', { p_week: week });
       fail(error);
     },
 
@@ -172,22 +239,16 @@ export function createSupabaseBackend(url: string, anonKey: string): Backend {
       fail(error);
     },
 
-    async listRequests(memberId) {
+    async listRequests(rosterId) {
       let q = sb.from('warehouse_requests').select('*').order('created_at', { ascending: false }).limit(300);
-      if (memberId) q = q.eq('member_id', memberId);
-      const [reqs, items, members] = await Promise.all([
-        q,
-        sb.from('warehouse_items').select('id, name, icon'),
-        sb.from('profiles').select('id, nickname'),
-      ]);
+      if (rosterId) q = q.eq('roster_id', rosterId);
+      const [reqs, items, nickById] = await Promise.all([q, sb.from('warehouse_items').select('id, name, icon'), rosterNames()]);
       fail(reqs.error);
       fail(items.error);
-      fail(members.error);
       const itemById = new Map((items.data ?? []).map((i) => [i.id, i]));
-      const nickById = new Map((members.data ?? []).map((m) => [m.id, m.nickname as string]));
       return (reqs.data ?? []).map((r) => ({
         ...r,
-        nickname: nickById.get(r.member_id) ?? '(알 수 없음)',
+        nickname: nickById.get(r.roster_id) ?? '(알 수 없음)',
         item_name: itemById.get(r.item_id)?.name ?? '(삭제된 아이템)',
         item_icon: itemById.get(r.item_id)?.icon ?? '📦',
       })) as ItemRequest[];

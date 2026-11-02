@@ -15,15 +15,16 @@ export function Warehouse() {
 }
 
 function WarehouseInner() {
-  const { me, refreshMe } = useAuth();
+  const { myRoster, refreshMe } = useAuth();
   const items = useLoad(() => api.listItems());
-  const requests = useLoad(() => api.listRequests(me!.id), [me?.id]);
+  const requests = useLoad(() => (myRoster ? api.listRequests(myRoster.id) : Promise.resolve([])), [myRoster?.id]);
   const [category, setCategory] = useState('전체');
   const [picked, setPicked] = useState<Item | null>(null);
   const { busy, run } = useAction();
 
   const pending = (requests.data ?? []).filter((r) => r.status === 'pending').reduce((s, r) => s + r.total_cost, 0);
-  const available = (me?.points ?? 0) - pending;
+  const coins = myRoster?.coins ?? 0;
+  const available = coins - pending;
   const active = (items.data ?? []).filter((i) => i.active);
   const categories = ['전체', ...new Set(active.map((i) => i.category))];
   const shown = active.filter((i) => category === '전체' || i.category === category);
@@ -38,13 +39,13 @@ function WarehouseInner() {
     <div className="page">
       <div className="page-head">
         <h1>문파창고</h1>
-        <p className="muted">문파 상점에서 사 둔 물품을 기여 점수로 신청하세요. 운영진이 승인하면 점수가 차감되고 게임에서 지급됩니다.</p>
+        <p className="muted">문파 상점에서 사 둔 물품을 문파 엽전으로 신청하세요. 운영진이 승인하면 엽전이 차감되고 게임에서 지급됩니다.</p>
       </div>
 
       <div className="wallet panel">
         <div>
-          <span className="stat-label">보유 기여 점수</span>
-          <span className="stat-value">{fmt(me?.points ?? 0)}</span>
+          <span className="stat-label">보유 엽전</span>
+          <span className="stat-value">{fmt(coins)}</span>
         </div>
         <div>
           <span className="stat-label">승인 대기 중</span>
@@ -55,6 +56,12 @@ function WarehouseInner() {
           <span className="stat-value up">{fmt(available)}</span>
         </div>
       </div>
+
+      {!myRoster && (
+        <p className="recruit">
+          아직 문파원 명단과 연결되지 않은 계정입니다. 내 정보에서 닉네임을 게임 닉네임과 똑같이 맞추면 자동으로 연결되고, 안 되면 운영진에게 연결을 요청하세요.
+        </p>
+      )}
 
       <div className="tabs" role="tablist">
         {categories.map((c) => (
@@ -73,12 +80,12 @@ function WarehouseInner() {
               <h3>{item.name}</h3>
               <p className="muted small">{item.description}</p>
               <div className="item-meta">
-                <span className="cost">🏮 {fmt(item.cost)}점</span>
+                <span className="cost">🪙 {fmt(item.cost)}전</span>
                 <span className="muted small">재고 {fmt(item.stock)}</span>
               </div>
             </div>
             <button className="btn btn-red btn-small" disabled={item.stock === 0 || item.cost > available} onClick={() => setPicked(item)}>
-              {item.stock === 0 ? '품절' : item.cost > available ? '점수 부족' : '신청'}
+              {item.stock === 0 ? '품절' : item.cost > available ? '엽전 부족' : '신청'}
             </button>
           </article>
         ))}
@@ -94,7 +101,7 @@ function WarehouseInner() {
                 <th>신청일</th>
                 <th>아이템</th>
                 <th className="r">수량</th>
-                <th className="r">점수</th>
+                <th className="r">엽전</th>
                 <th>상태</th>
                 <th />
               </tr>
@@ -170,7 +177,7 @@ function RequestDialog({ item, available, onClose, onDone }: { item: Item; avail
           <input className="input" placeholder="예: 무기 강화용" maxLength={100} value={note} onChange={(e) => setNote(e.target.value)} />
         </label>
         <p className="total">
-          필요 점수 <strong>{fmt(total)}점</strong> <span className="muted">/ 사용 가능 {fmt(available)}점</span>
+          필요 엽전 <strong>{fmt(total)}전</strong> <span className="muted">/ 사용 가능 {fmt(available)}전</span>
         </p>
         <div className="row-end">
           <button className="btn" onClick={onClose}>

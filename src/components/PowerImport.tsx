@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
-import { api, errorMessage, fmt } from '../lib/api';
+import { api, fmt } from '../lib/api';
 import { useAction, useLoad } from '../lib/hooks';
 import { readScreenshot } from '../lib/ocr';
 import { matchPowers } from '../lib/powerParse';
-import type { Member } from '../lib/types';
+import type { RosterMember } from '../lib/types';
 
 interface Row {
-  member: Member;
+  member: RosterMember;
   value: string;
   checked: boolean;
   rowText: string;
@@ -14,7 +14,7 @@ interface Row {
 
 /** 운영진용: 게임 문파원 목록 스크린샷 여러 장으로 전체 전투력을 한 번에 갱신 */
 export function PowerImport({ onSaved }: { onSaved?: () => void }) {
-  const members = useLoad(() => api.listMembers());
+  const members = useLoad(() => api.listRoster());
   const [files, setFiles] = useState<File[]>([]);
   const [progress, setProgress] = useState<string | null>(null);
   const [rows, setRows] = useState<Row[] | null>(null);
@@ -32,7 +32,7 @@ export function PowerImport({ onSaved }: { onSaved?: () => void }) {
     return () => window.removeEventListener('paste', onPaste);
   }, []);
 
-  const list = (members.data ?? []).filter((m) => m.approved);
+  const list = (members.data ?? []).filter((m) => m.active);
 
   async function analyze() {
     const allRows = [];
@@ -62,7 +62,7 @@ export function PowerImport({ onSaved }: { onSaved?: () => void }) {
           <li>게임에서 문파원 목록을 열고, 닉네임과 전투력이 보이게 스크롤하며 여러 장 캡처합니다.</li>
           <li>아래에 파일을 고르거나 Ctrl+V 로 붙여 넣고 <strong>읽기</strong>를 누릅니다.</li>
           <li>읽은 값을 확인·수정한 뒤 저장합니다. 이미지는 이 브라우저에서만 처리되고 업로드되지 않습니다.</li>
-          <li>저장이 끝나면 아래 <strong>주간 결산</strong>으로 이번 주 최고 전투력·최고 성장 보너스를 줍니다.</li>
+          <li>매주 수요일에 갱신하고, 아래 <strong>주간 결산</strong>으로 지난 주 엽전 분배와 최고 전투력·최고 성장 보너스를 줍니다.</li>
         </ol>
         <div className="row">
           <input ref={inputRef} type="file" accept="image/*" multiple hidden onChange={(e) => setFiles((f) => [...f, ...(e.target.files ?? [])])} />
@@ -102,19 +102,10 @@ export function PowerImport({ onSaved }: { onSaved?: () => void }) {
               disabled={busy || !toSave.length}
               onClick={() =>
                 run(async () => {
-                  // 한 명이 실패해도 나머지는 저장하고, 실패한 사람만 표에 남김
-                  const failed: string[] = [];
-                  for (const r of toSave) {
-                    try {
-                      await api.adminUpdateMember(r.member.id, { combat_power: Math.floor(Number(r.value)) });
-                    } catch (e) {
-                      failed.push(`${r.member.nickname}(${errorMessage(e)})`);
-                    }
-                  }
+                  await api.setPowers(toSave.map((r) => ({ id: r.member.id, combat_power: Math.floor(Number(r.value)) })));
                   members.reload();
                   onSaved?.();
-                  setRows((rs) => rs!.filter((r) => !toSave.includes(r) || failed.some((f) => f.startsWith(r.member.nickname + '('))));
-                  if (failed.length) throw new Error(`${toSave.length - failed.length}명 저장, ${failed.length}명 실패: ${failed.join(', ')}`);
+                  setRows((rs) => rs!.filter((r) => !toSave.includes(r)));
                 }, `${toSave.length}명의 전투력을 갱신했습니다`)
               }
             >
@@ -163,7 +154,7 @@ export function PowerImport({ onSaved }: { onSaved?: () => void }) {
           </div>
           {missing.length > 0 && (
             <p className="muted small">
-              못 찾은 문파원 ({missing.length}명): {missing.map((m) => m.nickname).join(', ')} — 해당 부분을 더 캡처하거나 문파원 관리에서 직접 입력하세요.
+              못 찾은 문파원 ({missing.length}명): {missing.map((m) => m.nickname).join(', ')} — 해당 부분을 더 캡처하거나 명단 관리에서 직접 입력하세요.
             </p>
           )}
           {unmatched.length > 0 && (
