@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { ActivityImport } from '../components/ActivityImport';
+import { SHOP_ITEMS, fixedPrice } from '../data/shop';
 import { ITEM_IMAGES, ITEM_IMAGE_LABEL, ItemIcon } from '../components/ItemIcon';
 import { MemberGate, RoleBadge } from '../components/Layout';
 import { PowerImport } from '../components/PowerImport';
@@ -529,6 +530,15 @@ function ItemsTab() {
   const [draft, setDraft] = useState<ItemDraft | null>(null);
   const { busy, run } = useAction();
   const set = <K extends keyof ItemDraft>(k: K, v: ItemDraft[K]) => setDraft((d) => (d ? { ...d, [k]: v } : d));
+  const list = items.data ?? [];
+  const have = new Set(list.map((i) => i.name));
+  const missing = SHOP_ITEMS.filter((s) => s.cost !== null && !have.has(s.name));
+  const wrong = list.filter((i) => fixedPrice(i.name) !== null && fixedPrice(i.name) !== i.cost);
+  const fixed = draft ? fixedPrice(draft.name) : null;
+  const pick = (name: string) => {
+    const s = SHOP_ITEMS.find((x) => x.name === name);
+    if (s) setDraft((d) => ({ ...(d ?? EMPTY_ITEM), name: s.name, category: s.category, icon: s.icon, description: s.description, cost: s.cost ?? d?.cost ?? 0 }));
+  };
 
   return (
     <div className="grid-2 wide-left">
@@ -539,6 +549,35 @@ function ItemsTab() {
             + 아이템 추가
           </button>
         </div>
+        <p className="muted small">🔒 문파 상점 품목은 게임 상점 가격(문파 엽전)으로 고정됩니다.</p>
+        {(missing.length > 0 || wrong.length > 0) && (
+          <div className="row">
+            {missing.length > 0 && (
+              <button
+                className="btn btn-small"
+                disabled={busy}
+                onClick={() =>
+                  run(async () => {
+                    for (const m of missing) await api.saveItem({ name: m.name, category: m.category, icon: m.icon, description: m.description, stock: 0, cost: m.cost!, active: true });
+                  }, `문파 상점 품목 ${missing.length}개를 넣었습니다. 재고를 채워 주세요`).then(() => items.reload())
+                }
+              >
+                문파 상점 품목 {missing.length}개 한꺼번에 넣기
+              </button>
+            )}
+            {wrong.length > 0 && (
+              <button
+                className="btn btn-small btn-red"
+                disabled={busy}
+                onClick={() => run(async () => {
+                  for (const i of wrong) await api.saveItem({ ...i });
+                }, `${wrong.length}개 가격을 상점 가격으로 맞췄습니다`).then(() => items.reload())}
+              >
+                {wrong.length}개 가격을 상점 가격으로 맞추기
+              </button>
+            )}
+          </div>
+        )}
         <div className="table-wrap">
           <table className="table">
             <thead>
@@ -551,14 +590,18 @@ function ItemsTab() {
               </tr>
             </thead>
             <tbody>
-              {(items.data ?? []).map((i) => (
+              {list.map((i) => (
                 <tr key={i.id} className={i.active ? undefined : 'dim'}>
                   <td className="strong">
                     <ItemIcon icon={i.icon} className="mini-icon" /> {i.name} {!i.active && <span className="muted small">(숨김)</span>}
                   </td>
                   <td>{i.category}</td>
                   <td className={`r num ${i.stock === 0 ? 'down' : ''}`}>{fmt(i.stock)}</td>
-                  <td className="r num">{fmt(i.cost)}전</td>
+                  <td className="r num">
+                    {fixedPrice(i.name) !== null && '🔒 '}
+                    {fmt(i.cost)}전
+                    {fixedPrice(i.name) !== null && fixedPrice(i.name) !== i.cost && <div className="small down">상점 가격 {fmt(fixedPrice(i.name)!)}전</div>}
+                  </td>
                   <td className="r">
                     <button className="link-btn" onClick={() => setDraft({ ...i })}>
                       수정
@@ -583,6 +626,19 @@ function ItemsTab() {
             }}
           >
             <h2 className="panel-title">{draft.id ? '아이템 수정' : '새 아이템'}</h2>
+            {!draft.id && (
+              <label className="field">
+                <span>문파 상점 품목에서 고르기</span>
+                <select className="input" value={SHOP_ITEMS.some((x) => x.name === draft.name) ? draft.name : ''} onChange={(e) => pick(e.target.value)}>
+                  <option value="">직접 입력</option>
+                  {SHOP_ITEMS.map((x) => (
+                    <option key={x.name} value={x.name}>
+                      {x.name} {x.cost !== null ? `(${fmt(x.cost)}전)` : '(가격 미확인)'}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
             <div className="form-row">
               <div className="field narrow-field">
                 <span>아이콘</span>
@@ -635,8 +691,15 @@ function ItemsTab() {
                 <input className="input" type="number" min={0} value={draft.stock} onChange={(e) => set('stock', Math.max(0, Math.floor(Number(e.target.value) || 0)))} />
               </label>
               <label className="field">
-                <span>가격 (엽전)</span>
-                <input className="input" type="number" min={0} value={draft.cost} onChange={(e) => set('cost', Math.max(0, Math.floor(Number(e.target.value) || 0)))} />
+                <span>가격 (엽전){fixed !== null && ' · 🔒 상점 가격 고정'}</span>
+                <input
+                  className="input"
+                  type="number"
+                  min={0}
+                  disabled={fixed !== null}
+                  value={fixed ?? draft.cost}
+                  onChange={(e) => set('cost', Math.max(0, Math.floor(Number(e.target.value) || 0)))}
+                />
               </label>
             </div>
             <label className="check">

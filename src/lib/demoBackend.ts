@@ -1,5 +1,6 @@
 // Supabase 연결 전에 화면을 미리 써 볼 수 있는 체험용 백엔드.
 // 데이터는 이 브라우저의 localStorage 에만 저장되며, 권한 규칙은 supabase/schema.sql 과 같게 맞춰 두었습니다.
+import { SHOP_ITEMS, fixedPrice } from '../data/shop';
 import {
   DEFAULT_ACTIVITY_POINTS,
   DEFAULT_WEEKLY_BONUS,
@@ -86,7 +87,7 @@ interface DemoState {
 }
 
 // 데이터 구조가 바뀌면 버전을 올려 예전 체험 데이터를 새로 시작합니다.
-const STORAGE_KEY = 'dokkaebi-guild-demo-v10';
+const STORAGE_KEY = 'dokkaebi-guild-demo-v11';
 const DAY = 86_400_000;
 
 export const DEMO_ACCOUNTS = [
@@ -210,40 +211,25 @@ function seed(): DemoState {
   coins.push(...settlementCoins(settledWeek, rows, DEFAULT_WEEKLY_BONUS, settled_at));
 
   // 문파 상점에서 사서 문파 창고에 넣어 둔 물품 (가격은 엽전)
-  const items: Item[] = [
-    ['용맹의 강타 도술 조각 선택 상자', '도술 조각', 'img:skill-select', '강타 도술 조각 중 하나를 골라 받는 상자', 4, 300],
-    ['용맹의 연타 도술 조각 선택 상자', '도술 조각', 'img:skill-select', '연타 도술 조각 중 하나를 골라 받는 상자', 3, 300],
-    ['용맹의 저격 도술 조각 선택 상자', '도술 조각', 'img:skill-select', '저격 도술 조각 중 하나를 골라 받는 상자', 3, 300],
-    ['용맹의 결명 도술 조각 선택 상자', '도술 조각', 'img:skill-select', '결명 도술 조각 중 하나를 골라 받는 상자', 2, 300],
-    ['용맹의 강인 도술 조각 선택 상자', '도술 조각', 'img:skill-select', '강인 도술 조각 중 하나를 골라 받는 상자', 2, 300],
-    ['용맹의 파멸 도술 조각 선택 상자', '도술 조각', 'img:skill-select', '파멸 도술 조각 중 하나를 골라 받는 상자', 2, 300],
-    ['용맹의 현신 도술 조각 선택 상자', '도술 조각', 'img:skill-select', '현신 도술 조각 중 하나를 골라 받는 상자', 1, 300],
-    ['용맹의 특별 도술 조각 랜덤 상자', '도술 조각', 'img:special-random', '특별 도술 조각 하나가 무작위로 나오는 상자', 2, 500],
-    ['용맹의 특별 도술 조각 선택 상자', '도술 조각', 'img:special-select', '특별 도술 조각 중 하나를 골라 받는 상자', 1, 1500],
-    ['영웅 무기 도안 선택 상자', '도안', '📜', '영웅 등급 무기 도안 선택 (문파 Lv.7 상품)', 3, 600],
-    ['산척의 방어구 도안 선택 상자', '도안', '📜', '영웅 등급 방어구 도안 선택 (문파 Lv.7 상품)', 3, 600],
-    ['영웅 장신구 도안 선택 상자', '도안', '📜', '영웅 등급 장신구 도안 선택 (문파 Lv.7 상품)', 2, 600],
-    ['전설 무기 도안 선택 상자', '도안', '🗡️', '전설 등급 무기 도안 선택 (문파 Lv.20 상품)', 0, 2000],
-    ['희귀 가호의 정수', '가호', 'img:rare-essence', '가호 강화 재료 (희귀)', 60, 10],
-    ['영웅 가호의 정수', '가호', 'img:hero-essence', '가호 강화 재료 (영웅)', 25, 40],
-    ['전설 가호의 정수', '가호', 'img:legend-essence', '가호 강화 재료 (전설)', 8, 120],
-    ['가호 주머니', '가호', 'img:pouch', '가호를 얻을 수 있는 주머니', 12, 80],
-    ['요혼석', '소모품', 'img:yohonseok', '문파 상점 요혼석', 150, 10],
-    ['특급 체력 회복 물약', '소모품', 'img:potion', '사냥·전장용 특급 체력 회복 물약', 40, 15],
-  ].map(([name, category, icon, description, stock, cost]) => ({
+  const stocks: Record<string, number> = {
+    '용맹의 강타 도술 조각 선택 상자': 2, '용맹의 연타 도술 조각 선택 상자': 1, '용맹의 저격 도술 조각 선택 상자': 1,
+    '용맹의 특별 도술 조각 랜덤 상자': 1, '희귀 가호의 정수': 60, '영웅 가호의 정수': 25, '전설 가호의 정수': 8,
+    '가호 주머니': 12, '요혼석': 150, '특급 체력 회복 물약': 40,
+  };
+  const items: Item[] = SHOP_ITEMS.filter((s) => s.cost !== null).map((s) => ({
     id: uid(),
-    name: name as string,
-    category: category as string,
-    icon: icon as string,
-    description: description as string,
-    stock: stock as number,
-    cost: cost as number,
+    name: s.name,
+    category: s.category,
+    icon: s.icon,
+    description: s.description,
+    stock: stocks[s.name] ?? 0,
+    cost: s.cost!,
     active: true,
   }));
 
   const requests: RawRequest[] = [
-    { id: uid(), roster_id: 'r4', item_id: items[0].id, quantity: 1, total_cost: 300, status: 'approved', note: '강타 세팅용', created_at: ago(5), decided_at: ago(4) },
-    { id: uid(), roster_id: 'r4', item_id: items[16].id, quantity: 2, total_cost: 160, status: 'pending', note: '', created_at: ago(0.3), decided_at: null },
+    { id: uid(), roster_id: 'r4', item_id: items[11].id, quantity: 1, total_cost: 350, status: 'approved', note: '가호 강화용', created_at: ago(5), decided_at: ago(4) },
+    { id: uid(), roster_id: 'r4', item_id: items[14].id, quantity: 2, total_cost: 180, status: 'pending', note: '', created_at: ago(0.3), decided_at: null },
     { id: uid(), roster_id: 'r6', item_id: items[9].id, quantity: 1, total_cost: 600, status: 'pending', note: '무기 교체', created_at: ago(0.1), decided_at: null },
   ];
   coins.push({ id: uid(), roster_id: 'r4', delta: -300, kind: 'warehouse', week: null, reason: `${items[0].name} x1`, created_at: ago(4) });
@@ -689,6 +675,7 @@ export function createDemoBackend(): Backend {
     async saveItem(item) {
       await tick();
       officerOnly('운영진만 관리할 수 있습니다');
+      item = { ...item, cost: fixedPrice(item.name) ?? item.cost };
       if (item.id) {
         state.items = state.items.map((i) => (i.id === item.id ? { ...i, ...item, id: i.id } : i));
       } else {

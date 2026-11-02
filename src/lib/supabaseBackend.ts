@@ -1,3 +1,4 @@
+import { fixedPrice } from '../data/shop';
 import { createClient, type Session as SbSession } from '@supabase/supabase-js';
 import type {
   ActivityKey, Backend, CoinEntry, Deck, GuestbookEntry, Item, ItemRequest, Member, RosterMember, Session, SettlementRow, WeekActivities,
@@ -234,6 +235,8 @@ export function createSupabaseBackend(url: string, anonKey: string): Backend {
       return (data ?? []) as Item[];
     },
     async saveItem({ id, ...fields }) {
+      // 문파 상점 품목은 게임 가격으로 고정
+      fields.cost = fixedPrice(fields.name) ?? fields.cost;
       const { error } = id
         ? await sb.from('warehouse_items').update(fields).eq('id', id)
         : await sb.from('warehouse_items').insert(fields);
