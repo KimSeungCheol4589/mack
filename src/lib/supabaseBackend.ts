@@ -197,6 +197,7 @@ export function createSupabaseBackend(url: string, anonKey: string): Backend {
         week: w.week as string,
         pool: w.pool as number,
         total_points: w.total_points as number,
+        guild_coins: (w.guild_coins as number | null) ?? null,
         settled_at: w.settled_at as string,
         rows: (rows.data ?? [])
           .filter((r) => r.week === w.week)

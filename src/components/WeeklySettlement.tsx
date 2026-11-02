@@ -33,6 +33,15 @@ export function WeeklySettlement({ refreshKey }: { refreshKey: number }) {
     setPool('');
   };
 
+  // 문파 엽전 차액: 지난 결산 때 기록한 보유량 → 지금 보유량 (지난 결산 뒤에 입력했을 때만)
+  const g = guild.data;
+  const last = settlements.data?.[0];
+  const fresh = !!g?.coins_at && (!last || g.coins_at > last.settled_at);
+  const diff = fresh && last?.guild_coins != null ? g!.coins - last.guild_coins : null;
+  useEffect(() => {
+    if (diff != null && diff >= 0) setPool(String(diff));
+  }, [diff]);
+
   return (
     <>
       <section className="panel">
@@ -53,6 +62,23 @@ export function WeeklySettlement({ refreshKey }: { refreshKey: number }) {
           전투력으로 보너스를 줍니다. 동점이면 모두 받습니다.
           {bonus && <> {BONUSES.map((b) => `${b.icon} ${b.label} +${fmt(bonus[b.key])}전`).join(' · ')}</>}
         </p>
+        <GuildCoins coins={g?.coins ?? 0} coinsAt={g?.coins_at ?? null} onSaved={guild.reload} />
+        {fresh && last && last.guild_coins == null && (
+          <p className="week-note">지난 결산 때 기록한 문파 엽전이 없어 차액을 계산할 수 없습니다. 이번에는 모인 엽전을 직접 적어 주세요. 다음 결산부터 자동으로 계산합니다.</p>
+        )}
+        {diff != null && (
+          <p className="week-note">
+            지난 결산({fmtDate(last!.settled_at)}) 때 {fmt(last!.guild_coins!)}전 → 지금 {fmt(g!.coins)}전,{' '}
+            {diff >= 0 ? (
+              <>
+                차액 <strong>{fmt(diff)}전</strong>을 분배 엽전으로 넣었습니다. 문파 상점에서 쓴 엽전이 있으면 그만큼 더해 고쳐 주세요.
+              </>
+            ) : (
+              <>차액이 {fmt(diff)}전입니다. 그 사이 문파 엽전을 썼다면 모인 엽전을 직접 적어 주세요.</>
+            )}
+          </p>
+        )}
+        {!fresh && week && <p className="week-note">결산하기 전에 위에 지금 게임의 문파 엽전을 입력하면, 지난 결산 때와의 차액을 분배 엽전으로 자동으로 넣습니다.</p>}
         {!week && settlements.data && <p className="week-note">이번 주까지 결산을 마쳤습니다. 다음 주 수요일에 다시 결산하세요.</p>}
         {week && preview.data && (
           <>
@@ -98,6 +124,28 @@ export function WeeklySettlement({ refreshKey }: { refreshKey: number }) {
   );
 }
 
+/** 지금 게임의 문파 엽전 보유량 입력 (결산 때 함께 기록되어 다음 주 차액 계산에 쓰임) */
+function GuildCoins({ coins, coinsAt, onSaved }: { coins: number; coinsAt: string | null; onSaved: () => void }) {
+  const [value, setValue] = useState('');
+  const { busy, run } = useAction();
+  return (
+    <div className="form-row settle-form">
+      <label className="field">
+        <span>지금 문파 엽전 (게임 화면 보유량)</span>
+        <input className="input num" inputMode="numeric" placeholder={coinsAt ? String(coins) : '예: 17200'} value={value} onChange={(e) => setValue(e.target.value.replace(/\D/g, ''))} />
+      </label>
+      <button
+        className="btn"
+        disabled={busy || value === ''}
+        onClick={() => run(() => api.updateGuild({ coins: Number(value) }), '문파 엽전을 저장했습니다').then((ok) => ok && (setValue(''), onSaved()))}
+      >
+        저장
+      </button>
+      <span className="muted small">{coinsAt ? `현재 ${fmt(coins)}전 · ${fmtDate(coinsAt)} 입력` : '아직 입력하지 않았습니다'}</span>
+    </div>
+  );
+}
+
 /** 결산 목록 (펼치면 표). onCancel 이 있으면 가장 최근 결산에 취소 버튼 */
 export function SettlementList({ list, onCancel, busy }: { list: Settlement[]; onCancel?: (week: string) => void; busy?: boolean }) {
   return (
@@ -112,7 +160,8 @@ export function SettlementList({ list, onCancel, busy }: { list: Settlement[]; o
                 <strong>{weekLabel(w.week)}</strong>
                 <span className="muted small">
                   {' '}
-                  {fmtDate(w.settled_at)} 결산 · 문파 엽전 {fmt(w.pool)}전 · {w.total_points}점
+                  {fmtDate(w.settled_at)} 결산 · 분배 엽전 {fmt(w.pool)}전 · {w.total_points}점
+                  {w.guild_coins != null && ` · 결산 때 문파 엽전 ${fmt(w.guild_coins)}전`}
                 </span>
                 <span className="award-line">
                   👑 {names(win.powerIds)} · 🔥 {names(win.growthIds)}

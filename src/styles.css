@@ -137,7 +137,7 @@ main { flex: 1; }
 .page-head h1 { font-size: 32px; color: #fff6e2; }
 .page-head p { margin: 6px 0 0; }
 
-.stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 16px; }
 .stat { display: flex; flex-direction: column; gap: 2px; }
 .stat-label { font-size: 13px; color: var(--text-soft); }
 .stat-value { font-family: var(--font-title); font-weight: 700; font-size: 26px; color: #fff6e2; }

@@ -2,7 +2,7 @@ import { Link } from 'react-router-dom';
 import { Hero } from '../components/Hero';
 import { ScoreGuide } from '../components/ScoreGuide';
 import { WeeklyAwards } from '../components/WeeklySettlement';
-import { api, fmt } from '../lib/api';
+import { api, fmt, fmtDate } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { useLoad } from '../lib/hooks';
 
@@ -52,6 +52,7 @@ export function Home() {
           <Stat label="문파원" value={`${list.length}명`} />
           <Stat label="총 전투력" value={fmt(total)} />
           <Stat label="주간 성장 합계" value={`+${fmt(growth)}`} accent />
+          <Stat label={g?.coins_at ? `문파 엽전 (${fmtDate(g.coins_at)})` : '문파 엽전'} value={g?.coins_at ? `${fmt(g.coins)}전` : '-'} />
         </div>
 
         <div className="grid-2">

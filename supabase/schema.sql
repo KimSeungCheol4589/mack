@@ -38,6 +38,9 @@ create table public.guild (
   activity_points jsonb not null default '{"yosin": 1, "barrier": 1, "singi": 1, "garden": 1, "discord": 1}',
   -- 주간 결산 보너스 엽전: 최고 전투력, 최고 성장
   weekly_bonus jsonb not null default '{"top_power": 300, "top_growth": 300}',
+  -- 게임의 문파 엽전 보유량 (운영진 입력). 다음 결산 때 지난 결산 기록과의 차액이 그 주 분배 엽전
+  coins       bigint not null default 0 check (coins >= 0),
+  coins_at    timestamptz,
   updated_at  timestamptz not null default now()
 );
 insert into public.guild (id) values (1);
@@ -107,6 +110,8 @@ create table public.settlements (
   week          date primary key check (week = week_start(week)),
   pool          int  not null check (pool >= 0),
   total_points  int  not null,
+  -- 결산할 때의 문파 엽전 보유량 (다음 결산 차액 계산용, 자동 기록)
+  guild_coins   bigint,
   settled_at    timestamptz not null default now(),
   settled_by    uuid references public.profiles default auth.uid()
 );
@@ -329,6 +334,9 @@ begin
           or new.weekly_bonus is distinct from old.weekly_bonus) then
     raise exception '점수·보너스 기준은 문주만 바꿀 수 있습니다';
   end if;
+  if new.coins is distinct from old.coins then
+    new.coins_at := now();
+  end if;
   new.updated_at := now();
   return new;
 end $$;
@@ -336,6 +344,18 @@ end $$;
 create trigger guild_touch
   before update on public.guild
   for each row execute function public.touch_guild();
+
+-- 결산할 때 그 시점의 문파 엽전 보유량을 남김 (입력한 적이 없으면 비움)
+create or replace function public.settlement_guild_coins() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  select case when coins_at is null then null else coins end into new.guild_coins from guild where id = 1;
+  return new;
+end $$;
+
+create trigger settlements_guild_coins
+  before insert on public.settlements
+  for each row execute function public.settlement_guild_coins();
 
 -- ---------------------------------------------------------------------
 -- 문파원 요약 뷰: 지난 결산 대비 성장, 보유·누적 엽전

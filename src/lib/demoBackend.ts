@@ -63,6 +63,7 @@ interface RawSettlement {
   week: string;
   pool: number;
   total_points: number;
+  guild_coins: number | null;
   settled_at: string;
   rows: RawRow[];
 }
@@ -85,7 +86,7 @@ interface DemoState {
 }
 
 // 데이터 구조가 바뀌면 버전을 올려 예전 체험 데이터를 새로 시작합니다.
-const STORAGE_KEY = 'dokkaebi-guild-demo-v9';
+const STORAGE_KEY = 'dokkaebi-guild-demo-v10';
 const DAY = 86_400_000;
 
 export const DEMO_ACCOUNTS = [
@@ -204,7 +205,7 @@ function seed(): DemoState {
   );
   const settled_at = ago(14 - 6);
   const settlements: RawSettlement[] = [
-    { week: settledWeek, pool, total_points: rows.reduce((s, r) => s + r.points, 0), settled_at, rows },
+    { week: settledWeek, pool, total_points: rows.reduce((s, r) => s + r.points, 0), guild_coins: 12_000, settled_at, rows },
   ];
   coins.push(...settlementCoins(settledWeek, rows, DEFAULT_WEEKLY_BONUS, settled_at));
 
@@ -259,6 +260,8 @@ function seed(): DemoState {
       recruiting: true,
       activity_points: DEFAULT_ACTIVITY_POINTS,
       weekly_bonus: DEFAULT_WEEKLY_BONUS,
+      coins: 17_200,
+      coins_at: ago(1),
     },
     profiles,
     roster,
@@ -480,7 +483,9 @@ export function createDemoBackend(): Backend {
         (patch.activity_points && JSON.stringify(patch.activity_points) !== JSON.stringify(state.guild.activity_points)) ||
         (patch.weekly_bonus && JSON.stringify(patch.weekly_bonus) !== JSON.stringify(state.guild.weekly_bonus));
       if (rulesChanged && !isMaster()) throw new Error('점수·보너스 기준은 문주만 바꿀 수 있습니다');
+      const before = state.guild;
       state.guild = { ...state.guild, ...patch };
+      if (patch.coins !== undefined && patch.coins !== before.coins) state.guild.coins_at = new Date().toISOString();
       save();
     },
 
@@ -660,7 +665,8 @@ export function createDemoBackend(): Backend {
       if (state.settlements.some((s) => s.week >= week)) throw new Error('이미 결산한 주이거나, 더 최근 주가 결산되어 있습니다');
       const now = new Date().toISOString();
       const rows = withShares(preview(week), Math.floor(pool)).map(({ nickname: _, ...r }) => r);
-      state.settlements.push({ week, pool: Math.floor(pool), total_points: rows.reduce((s, r) => s + r.points, 0), settled_at: now, rows });
+      const guild_coins = state.guild.coins_at ? state.guild.coins : null;
+      state.settlements.push({ week, pool: Math.floor(pool), total_points: rows.reduce((s, r) => s + r.points, 0), guild_coins, settled_at: now, rows });
       state.coins.push(...settlementCoins(week, rows, state.guild.weekly_bonus, now));
       save();
     },

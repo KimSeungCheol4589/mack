@@ -16,6 +16,10 @@ export interface Guild {
   activity_points: Record<ActivityKey, number>;
   /** 주간 결산 보너스 엽전: 최고 전투력, 최고 성장 */
   weekly_bonus: Record<BonusKey, number>;
+  /** 게임의 문파 엽전 보유량 (운영진 입력) */
+  coins: number;
+  /** 문파 엽전을 마지막으로 입력한 때 (입력한 적 없으면 null) */
+  coins_at: string | null;
 }
 
 /** 홈페이지 계정 (구글 로그인) */
@@ -89,6 +93,8 @@ export interface Settlement {
   week: string;
   pool: number;
   total_points: number;
+  /** 결산할 때의 문파 엽전 보유량 (다음 결산 차액 계산용) */
+  guild_coins: number | null;
   settled_at: string;
   rows: SettlementRow[];
 }
