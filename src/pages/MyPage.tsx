@@ -106,7 +106,7 @@ export function MyPage() {
                 <span className="muted small">
                   {a.icon} {a.label}
                 </span>
-                <strong>{mine?.[a.key] ? (a.multi ? `${mine[a.key]}회` : '✓') : '-'}</strong>
+                <strong>{mine?.[a.key] ? (a.multi ? `${mine[a.key]}회` : `${guild.data?.activity_points[a.key] ?? 1}점`) : '-'}</strong>
               </div>
             ))}
             <div className="activity-count">

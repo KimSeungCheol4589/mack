@@ -481,6 +481,8 @@ textarea.input { resize: vertical; }
 .rank-badge-1 { color: var(--gold-2); border-color: var(--line-strong); }
 .input-tiny { width: 46px; padding: 3px 6px; text-align: center; }
 .sheet input[type='checkbox'] { width: 18px; height: 18px; accent-color: var(--jade); cursor: pointer; }
+.pt-toggle { min-width: 32px; padding: 3px 6px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: var(--text-dim); font: inherit; font-weight: 700; cursor: pointer; }
+.pt-toggle.on { color: var(--up); border-color: var(--up); background: rgba(95, 208, 160, .12); }
 
 /* ---------- 엽전 ---------- */
 .kind-share { background: rgba(233, 184, 96, .16); color: var(--gold-2); }

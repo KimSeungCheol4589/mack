@@ -1,7 +1,7 @@
 export type Role = 'master' | 'officer' | 'member';
 /** 명단 직위 (게임 문파 직위) */
 export type Rank = '문파장' | '부문파장' | '문파원';
-export type ActivityKey = 'yosin' | 'barrier' | 'singi' | 'garden' | 'discord';
+export type ActivityKey = 'yosin' | 'barrier' | 'singi' | 'garden' | 'clone' | 'discord';
 export type BonusKey = 'top_power' | 'top_growth';
 export type CoinKind = 'share' | BonusKey | 'warehouse' | 'adjust';
 export type RequestStatus = 'pending' | 'approved' | 'rejected' | 'cancelled';
@@ -254,6 +254,8 @@ export const ACTIVITIES: { key: ActivityKey; label: string; short: string; icon:
   { key: 'barrier', label: '결계지 방어', short: '결계지', icon: '🛡️' },
   { key: 'singi', label: '신기 쟁탈전', short: '신기', icon: '🏆' },
   { key: 'garden', label: '미혹의 정원', short: '미혹', icon: '🌸' },
+  // 문파 콘텐츠에 분신으로만 참여한 횟수 (요신·결계지 둘 다면 2)
+  { key: 'clone', label: '분신 참여', short: '분신', icon: '👥', multi: true },
   { key: 'discord', label: '디스코드 참여', short: '디코', icon: '🎧', multi: true },
 ];
 
@@ -270,6 +272,7 @@ export const DEFAULT_ACTIVITY_POINTS: Record<ActivityKey, number> = {
   barrier: 1,
   singi: 1,
   garden: 1,
+  clone: 1,
   discord: 1,
 };
 

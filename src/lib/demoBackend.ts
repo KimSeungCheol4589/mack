@@ -87,7 +87,7 @@ interface DemoState {
 }
 
 // 데이터 구조가 바뀌면 버전을 올려 예전 체험 데이터를 새로 시작합니다.
-const STORAGE_KEY = 'dokkaebi-guild-demo-v11';
+const STORAGE_KEY = 'dokkaebi-guild-demo-v12';
 const DAY = 86_400_000;
 
 export const DEMO_ACCOUNTS = [
@@ -606,7 +606,7 @@ export function createDemoBackend(): Backend {
     async setActivity(rosterId, kind, week, count) {
       officerOnly('운영진만 기록할 수 있습니다');
       if (week !== weekStart(week)) throw new Error('주 시작일(수요일)이 아닙니다');
-      if (count < 0 || count > 50 || (kind !== 'discord' && count > 1)) throw new Error('참여 횟수를 확인해 주세요');
+      if (count < 0 || count > 50 || (kind !== 'discord' && kind !== 'clone' && count > 1)) throw new Error('참여 횟수를 확인해 주세요');
       state.activities = state.activities.filter((a) => !(a.roster_id === rosterId && a.kind === kind && a.week === week));
       if (count > 0) state.activities.push({ roster_id: rosterId, kind, week, count });
       save();

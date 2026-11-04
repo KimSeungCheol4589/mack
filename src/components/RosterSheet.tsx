@@ -100,7 +100,7 @@ export function RosterSheet({ editable = false, onChanged }: { editable?: boolea
         <input className="input" placeholder="닉네임 검색" value={query} onChange={(e) => setQuery(e.target.value)} />
       </div>
       {editable && <QuickAdd existing={roster.data ?? []} initial={rows.length ? '' : query.trim()} onAdded={() => { roster.reload(); onChanged?.(); }} />}
-      {editable && <p className="muted small">칸을 누르면 바로 저장됩니다. 디코는 참여 횟수를 적으세요. 결산한 주는 고쳐도 이미 나눈 엽전은 바뀌지 않습니다.</p>}
+      {editable && <p className="muted small">칸을 누르면 바로 저장됩니다. 콘텐츠는 누르면 1점, 분신·디코는 횟수를 적으세요 (분신은 분신으로만 참여한 콘텐츠 수). 결산한 주는 고쳐도 이미 나눈 엽전은 바뀌지 않습니다.</p>}
 
       {roster.error && <p className="error">{roster.error}</p>}
       <div className="table-wrap">
@@ -156,10 +156,18 @@ export function RosterSheet({ editable = false, onChanged }: { editable?: boolea
                               onChange={(e) => setCount(m, a.key, Math.min(50, Number(e.target.value.replace(/\D/g, '')) || 0))}
                             />
                           ) : (
-                            <input type="checkbox" aria-label={`${m.nickname} ${a.label}`} checked={n > 0} onChange={(e) => setCount(m, a.key, e.target.checked ? 1 : 0)} />
+                            <button
+                              type="button"
+                              className={`pt-toggle${n > 0 ? ' on' : ''}`}
+                              aria-label={`${m.nickname} ${a.label}`}
+                              aria-pressed={n > 0}
+                              onClick={() => setCount(m, a.key, n > 0 ? 0 : 1)}
+                            >
+                              {n > 0 ? (pts?.[a.key] ?? 1) : '·'}
+                            </button>
                           )
                         ) : n > 0 ? (
-                          <span className="check-on">{a.multi ? n : '✓'}</span>
+                          <span className="check-on">{a.multi ? n : (pts?.[a.key] ?? 1)}</span>
                         ) : (
                           <span className="check-off">·</span>
                         )}

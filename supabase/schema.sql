@@ -34,8 +34,8 @@ create table public.guild (
   motto       text    not null default '',
   notice      text    not null default '',
   recruiting  boolean not null default true,
-  -- 콘텐츠 1회 참여 점수 (디코는 횟수만큼)
-  activity_points jsonb not null default '{"yosin": 1, "barrier": 1, "singi": 1, "garden": 1, "discord": 1}',
+  -- 콘텐츠 1회 참여 점수 (분신·디코는 횟수만큼)
+  activity_points jsonb not null default '{"yosin": 1, "barrier": 1, "singi": 1, "garden": 1, "clone": 1, "discord": 1}',
   -- 주간 결산 보너스 엽전: 최고 전투력, 최고 성장
   weekly_bonus jsonb not null default '{"top_power": 300, "top_growth": 300}',
   -- 게임의 문파 엽전 보유량 (운영진 입력). 다음 결산 때 지난 결산 기록과의 차액이 그 주 분배 엽전
@@ -80,12 +80,12 @@ create table public.roster_power (
 );
 create index roster_power_idx on public.roster_power (roster_id, recorded_at);
 
--- 콘텐츠 참여: 한 사람·한 콘텐츠·한 주에 한 줄. 디코만 count 가 1 보다 클 수 있음
+-- 콘텐츠 참여: 한 사람·한 콘텐츠·한 주에 한 줄. 분신(분신으로만 참여한 콘텐츠 수)·디코는 count 가 1 보다 클 수 있음
 create table public.activities (
   roster_id   uuid not null references public.roster on delete cascade,
-  kind        text not null check (kind in ('yosin', 'barrier', 'singi', 'garden', 'discord')),
+  kind        text not null check (kind in ('yosin', 'barrier', 'singi', 'garden', 'clone', 'discord')),
   week        date not null check (week = week_start(week)),
-  count       int  not null check (count between 1 and 50 and (kind = 'discord' or count = 1)),
+  count       int  not null check (count between 1 and 50 and (kind in ('discord', 'clone') or count = 1)),
   updated_at  timestamptz not null default now(),
   primary key (roster_id, kind, week)
 );
